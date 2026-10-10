@@ -38,8 +38,20 @@ s=$(stty -g); stty -echo; printf '\e[5n'; IFS= read -rs -t1 -d n r && echo ok ||
 ```
 
 If the terminal doesn't answer within 1 s, or the shell isn't interactive, the
-command is printed instead of placed on the prompt. Both emacs and vi
+command is printed instead of placed on the prompt. Ctrl-C during that wait
+cancels the call and leaves your terminal as it was. Both emacs and vi
 (`set -o vi`) editing modes work.
+
+Known limitation: on a terminal that doesn't answer, keys you type while
+`how-to` is waiting for the model are mistaken for the reply, so the command
+is neither placed nor printed. Run it again without typing ahead.
+
+Sourcing the bash file in an interactive shell also appends
+`_how_to_restore_glob` to `PROMPT_COMMAND` (once, even if you re-source).
+It turns globbing back on if a request word failed to expand (for example
+`how-to print $1` under `set -u`), which aborts the line before `how-to` can
+undo its `set -f`. It keeps `$?` intact for your other prompt hooks. If you
+assign `PROMPT_COMMAND` after sourcing, append to it instead of replacing it.
 
 ## Use
 
@@ -70,8 +82,10 @@ same way. The quoting advice above applies too. Because the alias is several
 commands joined by `;`:
 
 - `HOW_TO_PROVIDER=ollama how-to ...` sets the variable for the rest of the
-  session, not just this call (a subshell can't fill your prompt, so there is
-  no one-off form; set it and change it back).
+  session, not just this call. For a one-off, call the function behind the
+  alias directly: `HOW_TO_PROVIDER=ollama _how_to_main ...`. That skips the
+  glob protection, so quote any `*` in the request, and it turns globbing on
+  if you had it off with `set -f`.
 - Don't chain it: `cond && how-to ...` runs `how-to` even when `cond` fails.
 
 ## Configuration

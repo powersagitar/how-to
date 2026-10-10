@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`how-to <request>` is a zsh function. It asks an LLM for a single shell command
-and places it on the user's prompt with `print -rz`, unexecuted. All the code is
-in `src/how-to.zsh`, which is meant to be sourced from `~/.zshrc`. It must be
-sourced, not run as a script, because a child process can't write to the
-parent shell's line editor. `src/how-to.bash` is the bash port (bash >= 4.4)
-with the same pipeline; see "bash conventions" below. User docs are in `docs/usage.md`; the design spec
+`how-to <request>` is a shell function for zsh and bash. It asks an LLM for a
+single shell command and places it on the user's prompt, unexecuted. There are
+two independent files with the same pipeline: `src/how-to.zsh` (sourced from
+`~/.zshrc`, pushes with `print -rz`) and `src/how-to.bash` (sourced from
+`~/.bashrc`, bash >= 4.4, pushes via a terminal DSR reply; see "bash
+conventions" below). They must be sourced, not run as scripts, because a child
+process can't write to the parent shell's line editor. User docs are in `docs/usage.md`; the design spec
 is in `docs/superpowers/specs/`.
 
 ## Commands
@@ -36,7 +37,8 @@ points are discovered by function name:
   plus `HOW_TO_CLAUDE_ARGS` (default `--model haiku`). **Never add `--bare`**,
   because it breaks OAuth login.
 - **Context providers** are `_how_to_context_<name>`, run in the order given by
-  `HOW_TO_CONTEXT` (an array or a space-separated string, split with `${=...}`).
+  `HOW_TO_CONTEXT` (an array or a space-separated string; zsh splits with
+  `${=...}`, bash with `read -ra`).
   Each prints `key: value` lines into a `<context>` block. Missing, failing, or
   empty providers are skipped silently.
 
@@ -46,8 +48,8 @@ the reason is shown on stderr. `_how_to_clean` keeps only the inside of the
 first code fence (the fence may be indented, and its content is dedented to
 match), then trims the result.
 
-Config variables are only set when unset (`(( ${+VAR} )) ||`), so user values
-survive re-sourcing.
+Config variables are only set when unset (zsh `(( ${+VAR} )) ||`, bash
+`declare -p VAR &>/dev/null ||`), so user values survive re-sourcing.
 
 ## zsh conventions (enforced by tests)
 

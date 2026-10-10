@@ -62,6 +62,14 @@ Bash has no `print -z`, and `TIOCSTI` is disabled. The terminal is made to
    - Without `-icanon`, `read -t 0` can't see input that has no newline.
    - If no reply arrives within 1 s, `_how_to_pending` is cleared and the
      command is printed to stdout so it isn't lost.
+   - The stty change and the wait run in a subshell whose `EXIT` trap
+     restores the saved settings and whose `INT` trap exits 130, so Ctrl-C
+     during the wait can't leave the tty in `-echo -icanon`. On 130,
+     `_how_to_pending` is cleared and `_how_to_push` returns 130 without
+     printing.
+   - Known limitation: `read -t 0` sees any pending input, so on a terminal
+     that never replies, typeahead is taken for the reply and the command is
+     neither inserted nor printed.
 3. Once readline is reading the next prompt it sees `\e[0n`, bound at
    source time with
    `bind -m emacs -x '"\e[0n": _how_to_insert'` (and the same for
@@ -106,6 +114,18 @@ Bash expands each command of a list only when it reaches it, so `set -f`
 takes effect before `_how_to_main`'s arguments are expanded. `_how_to_main`
 first restores globbing (`set +f`) if `_how_to_f` did not contain `f`, then
 runs the pipeline. `how-to find *.log` therefore sends `*.log` literally.
+
+If a request word fails to expand (`$1` under `set -u`, `${x:?}`), bash aborts
+the line after `set -f` but before `_how_to_main` runs. To cover that, an
+interactive source appends `_how_to_restore_glob` to `PROMPT_COMMAND` once
+(as an array element when it's an array, else newline-joined to the string).
+At the next prompt it does the same restore if `_how_to_f` is still set, and
+preserves `$?`.
+
+Because the alias is a `;` list, `VAR=x how-to ...` assigns `VAR` for the
+session and `cond && how-to ...` runs regardless of `cond`. No alias form does
+better in bash (an option can't change mid-expansion), so this is documented
+rather than fixed; `VAR=x _how_to_main ...` is the one-shot form.
 
 ## Pipeline
 
