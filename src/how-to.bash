@@ -173,6 +173,44 @@ _how_to_main() {
   _how_to_push "$cmd"
 }
 
+# --- putting the command on the prompt ---------------------------------------
+# bash has no `print -z`. Instead, ask the terminal for a Device Status Report
+# (\e[5n). Its reply (\e[0n) waits in the tty's input until readline reads the
+# next prompt, where it is bound to _how_to_insert. Echo is off while the reply
+# arrives (else it shows as ^[[0n) and canonical mode is off so `read -t 0`
+# can see it. No reply within 1 s, or no terminal: print the command instead.
+_how_to_pending=
+_how_to_push() {
+  local -
+  local saved i
+  if [[ $- == *i* ]] && saved=$(command stty -g </dev/tty 2>/dev/null); then
+    _how_to_pending=$1
+    command stty -echo -icanon </dev/tty
+    printf '\e[5n' >/dev/tty
+    for (( i = 0; i < 100; i++ )); do
+      read -t 0 </dev/tty && break
+      command sleep 0.01
+    done
+    command stty "$saved" </dev/tty
+    (( i < 100 )) && return 0
+    _how_to_pending=
+  fi
+  printf '%s\n' "$1"
+}
+
+_how_to_insert() {
+  local -
+  [[ -n $_how_to_pending ]] || return 0
+  READLINE_LINE=$_how_to_pending
+  READLINE_POINT=${#READLINE_LINE}
+  _how_to_pending=
+}
+
+if [[ $- == *i* ]]; then
+  bind -m emacs -x '"\e[0n": _how_to_insert' 2>/dev/null
+  bind -m vi-insert -x '"\e[0n": _how_to_insert' 2>/dev/null
+fi
+
 # Keep globs like *.log in the request from being expanded by the shell.
 # Defined last, so no `how-to` above is alias-expanded.
 alias how-to='_how_to_f=$-; set -f; _how_to_main'

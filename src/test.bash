@@ -142,4 +142,72 @@ assert_eq "claude argv" $'--print|--tools||--no-session-persistence|--system-pro
 assert_eq "claude args override" $'--print|--tools||--no-session-persistence|--system-prompt|SYS|--model|sonnet|\nIN' \
   "$(PATH=$tmp/bin:$PATH; HOW_TO_CLAUDE_ARGS='--model sonnet'; echo IN | _how_to_provider_claude SYS)"
 
+# --- push and readline insertion (fresh source: the real _how_to_push)
+assert_eq "push: non-interactive prints" 'printf %s\n a\tb' \
+  "$(source "$here/how-to.bash"; _how_to_push 'printf %s\n a\tb')"
+_how_to_pending='printf %s\n a\tb'; READLINE_LINE=; READLINE_POINT=0; _how_to_insert
+assert_eq "insert: verbatim" 'printf %s\n a\tb' "$READLINE_LINE"
+assert_eq "insert: point at end" 16 "$READLINE_POINT"
+assert_eq "insert: pending cleared" '' "$_how_to_pending"
+READLINE_LINE=keep; _how_to_insert
+assert_eq "insert: no-op when empty" keep "$READLINE_LINE"
+assert_eq "source: silent non-interactive" '' "$("$BASH" -c "source '$here/how-to.bash'" 2>&1)"
+for map in emacs vi-insert; do
+  assert_eq "bind: $map" yes "$("$BASH" --norc -ic "source '$here/how-to.bash'; bind -m $map -X" 2>/dev/null |
+    grep -qE '^"\\e\[0n":? "_how_to_insert"$' && echo yes)"
+done
+
+# --- pty: interactive bash with expect playing the terminal
+if type -P expect >/dev/null; then
+  cat > "$tmp/pty.exp" <<'EOF'
+lassign $argv bash rc mode marker
+set timeout 5
+log_user 0
+set all ""
+proc done {s} { puts $s; exit }
+proc want {pat} {
+  global all
+  expect -ex $pat { append all $expect_out(buffer) } timeout { done PTY-FAIL } eof { done PTY-FAIL }
+}
+spawn -noecho env TERM=xterm $bash --noprofile --rcfile $rc -i
+want "P> "
+send "how-to x\r"
+want "\033\[5n"
+if {$mode eq "none"} {
+  # Never answer: the command is printed, and the tty is cooked with echo again.
+  want "$marker\r\n"
+  want "P> "
+  send "head -1\r"
+  after 300
+  send "zzz\r"
+  want "zzz\r\nzzz"
+} else {
+  if {$mode ne "0"} { sleep $mode }
+  send "\033\[0n"
+  want "P> "
+  send "\r"
+  want $marker
+  want "P> "
+}
+if {[string first "\[0n" $all] >= 0} { done PTY-ECHOED }
+done PTY-OK
+EOF
+  pty() {  # pty <mode: 0|seconds|none> <marker> <stub output>
+    printf '%s\n' "$3" > "$tmp/pty_cmd"
+    cat > "$tmp/pty_rc" <<EOF
+PS1='P> '; HISTFILE=; unset PROMPT_COMMAND
+source '$here/how-to.bash'
+HOW_TO_CONTEXT=() HOW_TO_PROVIDER=stub
+_how_to_provider_stub() { cat >/dev/null; cat '$tmp/pty_cmd'; }
+EOF
+    expect "$tmp/pty.exp" "$BASH" "$tmp/pty_rc" "$1" "$2"
+  }
+  assert_eq "pty: inserted"   PTY-OK "$(pty 0   INSERTED-42 'echo INSERTED-$((6*7))')"
+  assert_eq "pty: slow reply" PTY-OK "$(pty 0.3 INSERTED-42 'echo INSERTED-$((6*7))')"
+  assert_eq "pty: multi-line" PTY-OK "$(pty 0   B-2 $'echo A \\\n  && echo B-$((1+1))')"
+  assert_eq "pty: no reply"   PTY-OK "$(pty none 'echo NOREPLY-$((1+1))' 'echo NOREPLY-$((1+1))')"
+else
+  echo 'skip pty (no expect)'
+fi
+
 exit $(( failures > 0 ))
