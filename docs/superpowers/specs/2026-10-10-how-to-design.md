@@ -132,8 +132,8 @@ Built-ins (all local, no network, no file contents):
 |---------|--------|
 | `os`    | `os: $(uname -sr)` |
 | `shell` | `shell: zsh $ZSH_VERSION` |
-| `cwd`   | `cwd: $PWD`; `files:` first 30 entries of `ls -A`, space-separated |
-| `git`   | `git_root:`, `git_branch:` — nothing if not in a repo |
+| `cwd`   | `cwd: $PWD`; `files:` up to 30 entries (incl. dotfiles, unsorted), space-separated |
+| `git`   | `git_root:`, `git_branch:` (from `symbolic-ref`; omitted when detached) — nothing if not in a repo |
 | `tools` | `tools:` the subset of a fixed list that is on `$PATH` (via `$+commands[...]`) |
 
 The `tools` candidate list is a variable, `HOW_TO_TOOLS`, defaulting to a

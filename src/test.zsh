@@ -96,4 +96,20 @@ assert_eq "clean: prose around fence" 'fd -e log' \
 stub_out=$'Sorry.\nHOWTO_FAIL: no'; run x
 assert_eq "fail on later line msg" 'no' "$err"; assert_eq "fail on later line not pushed" '' "$pushed"
 
+# --- deferred fixes
+assert_eq "clean: indented fence" 'ls -la' "$(print -r -- $'  ```bash\n  ls -la\n  ```' | _how_to_clean)"
+assert_eq "clean: indented fence dedents" $'a \\\n  && b' \
+  "$(print -r -- $'Run:\n   ```\n   a \\\n     && b\n   ```' | _how_to_clean)"
+assert_eq "ctx: scalar list split" $'<context>\na: 1\nb: 2\n</context>' "$(
+  _how_to_context_a() { print 'a: 1' }; _how_to_context_b() { print 'b: 2' }
+  HOW_TO_CONTEXT='a b'; _how_to_context 2>&1)"
+assert_eq "tools: scalar list split" 'tools: zsh sh' "$(HOW_TO_TOOLS='zsh sh'; _how_to_context_tools)"
+assert_eq "os: ignores uname function" "os: $(command uname -sr)" "$(uname() { print FAKE }; _how_to_context_os)"
+assert_eq "git: ignores git function" "git_root: ${here:h}" "$(cd $here; git() { print FAKE }; _how_to_context_git | head -1)"
+git init -q -b trunk $tmp/repo
+assert_eq "git: branch with no commits" 'git_branch: trunk' "$(cd $tmp/repo && _how_to_context_git | sed -n 2p)"
+git -C $tmp/repo -c user.name=t -c user.email=t@t commit -q --allow-empty -m x
+git -C $tmp/repo checkout -q --detach
+assert_eq "git: no branch when detached" "git_root: ${tmp:A}/repo" "$(cd $tmp/repo && _how_to_context_git)"
+
 exit $(( failures > 0 ))

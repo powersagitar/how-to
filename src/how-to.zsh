@@ -2,17 +2,19 @@
 # usage: source /path/to/how-to.zsh   (from ~/.zshrc)
 
 # Reduce a model response (stdin) to the command: if it has a fenced block,
-# keep only the inside of the first one; strip surrounding blank lines and
-# trailing whitespace. Inner indentation is kept.
+# keep only the inside of the first one (dedented by the fence's own indent);
+# strip surrounding blank lines and trailing whitespace. Inner indentation is
+# otherwise kept.
 _how_to_clean() {
   emulate -L zsh -o extendedglob
   local -a lines
   lines=("${(@f)$(<&0)}")
-  integer i=${lines[(i)\`\`\`*]}
+  integer i=${lines[(i)[[:space:]]#\`\`\`*]}
   if (( i <= $#lines )); then
+    local indent=${(M)lines[i]##[[:space:]]#}
     lines=("${(@)lines[i+1,-1]}")
-    i=${lines[(i)\`\`\`*]}
-    lines=("${(@)lines[1,i-1]}")
+    i=${lines[(i)[[:space:]]#\`\`\`*]}
+    lines=("${(@)${(@)lines[1,i-1]}#$indent}")
   fi
   lines=("${(@)lines%%[[:space:]]##}")         # trailing whitespace
   while (( $#lines )) && [[ -z ${lines[1]} ]]; do shift lines; done
@@ -29,12 +31,12 @@ _how_to_clean() {
 (( ${+HOW_TO_CONTEXT} )) || typeset -ga HOW_TO_CONTEXT=(os shell cwd git tools)
 (( ${+HOW_TO_TOOLS} ))   || typeset -ga HOW_TO_TOOLS=(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)
 
-_how_to_context_os()    { emulate -L zsh; print -r -- "os: $(uname -sr)" }
+_how_to_context_os()    { emulate -L zsh; print -r -- "os: $(command uname -sr)" }
 _how_to_context_shell() { emulate -L zsh; print -r -- "shell: zsh $ZSH_VERSION" }
 
 _how_to_context_cwd() {
   emulate -L zsh
-  local -a files=(*(DN[1,30]:t))
+  local -a files=(*(DNoN[1,30]:t))   # oN: skip sorting big dirs
   print -r -- "cwd: $PWD"
   (( $#files )) && print -r -- "files: ${files[*]}"
   return 0
@@ -42,28 +44,31 @@ _how_to_context_cwd() {
 
 _how_to_context_git() {
   emulate -L zsh
-  local -a info=("${(@f)$(git rev-parse --show-toplevel --abbrev-ref HEAD 2>/dev/null)}")
-  [[ -n ${info[1]} ]] || return 0
-  print -r -- "git_root: ${info[1]}"
-  [[ -n ${info[2]} ]] && print -r -- "git_branch: ${info[2]}"
+  local root branch
+  root=$(command git rev-parse --show-toplevel 2>/dev/null) || return 0
+  print -r -- "git_root: $root"
+  # symbolic-ref works before the first commit; prints nothing when detached
+  branch=$(command git symbolic-ref --short -q HEAD 2>/dev/null)
+  [[ -n $branch ]] && print -r -- "git_branch: $branch"
   return 0
 }
 
 _how_to_context_tools() {
   emulate -L zsh
   local t; local -a found
-  for t in $HOW_TO_TOOLS; (( $+commands[$t] )) && found+=($t)
+  for t in ${=HOW_TO_TOOLS}; (( $+commands[$t] )) && found+=($t)
   (( $#found )) && print -r -- "tools: ${found[*]}"
   return 0
 }
 
 # Print the <context> block built from HOW_TO_CONTEXT. Missing or failing
-# providers contribute nothing.
+# providers contribute nothing. A space-separated string works as well as an
+# array.
 _how_to_context() {
   emulate -L zsh
   local name out
   print -r -- '<context>'
-  for name in $HOW_TO_CONTEXT; do
+  for name in ${=HOW_TO_CONTEXT}; do
     (( $+functions[_how_to_context_$name] )) || continue
     out=$(_how_to_context_$name 2>/dev/null) || continue
     [[ -n $out ]] && print -r -- "$out"

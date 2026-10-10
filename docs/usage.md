@@ -50,6 +50,8 @@ Set these in `~/.zshrc` (before or after sourcing).
 | `HOW_TO_TOOLS` | `(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)` | tools reported as installed, if found |
 | `HOW_TO_SYSTEM_PROMPT` | see `src/how-to.zsh` | rules sent to the model |
 
+`HOW_TO_CONTEXT` and `HOW_TO_TOOLS` can be arrays or space-separated strings.
+
 ## Writing a provider
 
 A provider is a zsh function named `_how_to_provider_<name>`:
