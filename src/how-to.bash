@@ -179,21 +179,28 @@ _how_to_main() {
 # next prompt, where it is bound to _how_to_insert. Echo is off while the reply
 # arrives (else it shows as ^[[0n) and canonical mode is off so `read -t 0`
 # can see it. No reply within 1 s, or no terminal: print the command instead.
+# The wait runs in a subshell whose EXIT trap restores the tty, so Ctrl-C
+# can't leave it in -echo -icanon.
 _how_to_pending=
 _how_to_push() {
   local -
-  local saved i
+  local saved rc=0
   if [[ $- == *i* ]] && saved=$(command stty -g </dev/tty 2>/dev/null); then
     _how_to_pending=$1
-    command stty -echo -icanon </dev/tty
-    printf '\e[5n' >/dev/tty
-    for (( i = 0; i < 100; i++ )); do
-      read -t 0 </dev/tty && break
-      command sleep 0.01
-    done
-    command stty "$saved" </dev/tty
-    (( i < 100 )) && return 0
+    (
+      trap 'command stty "$saved" </dev/tty' EXIT
+      trap 'exit 130' INT
+      command stty -echo -icanon </dev/tty
+      printf '\e[5n' >/dev/tty
+      for (( i = 0; i < 100; i++ )); do
+        read -t 0 </dev/tty && exit 0
+        command sleep 0.01
+      done
+      exit 1
+    ) || rc=$?
+    (( rc == 0 )) && return 0
     _how_to_pending=
+    (( rc == 130 )) && return 130
   fi
   printf '%s\n' "$1"
 }
@@ -206,9 +213,28 @@ _how_to_insert() {
   _how_to_pending=
 }
 
+# A request word that fails to expand (e.g. $1 under set -u) aborts the line
+# after the alias's `set -f` but before _how_to_main can undo it. Undo it at
+# the next prompt instead. No `local -`: changing the caller's options is the
+# point.
+_how_to_restore_glob() {
+  local rc=$?
+  if [[ -v _how_to_f ]]; then
+    [[ $_how_to_f == *f* ]] || set +f
+    unset _how_to_f
+  fi
+  return "$rc"
+}
+
 if [[ $- == *i* ]]; then
   bind -m emacs -x '"\e[0n": _how_to_insert' 2>/dev/null
   bind -m vi-insert -x '"\e[0n": _how_to_insert' 2>/dev/null
+  if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
+    [[ " ${PROMPT_COMMAND[*]} " == *' _how_to_restore_glob '* ]] ||
+      PROMPT_COMMAND+=(_how_to_restore_glob)
+  elif [[ ${PROMPT_COMMAND-} != *_how_to_restore_glob* ]]; then
+    PROMPT_COMMAND=${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}_how_to_restore_glob
+  fi
 fi
 
 # Keep globs like *.log in the request from being expanded by the shell.

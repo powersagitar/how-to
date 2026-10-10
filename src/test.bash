@@ -157,6 +157,12 @@ for map in emacs vi-insert; do
     grep -qE '^"\\e\[0n":? "_how_to_insert"$' && echo yes)"
 done
 
+assert_eq "prompt_command: string appended once" $'echo hi\n_how_to_restore_glob' "$("$BASH" --norc -ic \
+  "PROMPT_COMMAND='echo hi'; source '$here/how-to.bash'; source '$here/how-to.bash'; printf %s \"\$PROMPT_COMMAND\"" 2>/dev/null)"
+assert_eq "prompt_command: array appended once" 'a _how_to_restore_glob' "$("$BASH" --norc -ic \
+  "PROMPT_COMMAND=(a); source '$here/how-to.bash'; source '$here/how-to.bash'; printf %s \"\${PROMPT_COMMAND[*]}\"" 2>/dev/null)"
+assert_eq "restore_glob: keeps \$?" 3 "$(_how_to_f=hB; set -f; (exit 3); _how_to_restore_glob; echo "$?${-//[^f]/}")"
+
 # --- pty: interactive bash with expect playing the terminal
 if type -P expect >/dev/null; then
   cat > "$tmp/pty.exp" <<'EOF'
@@ -171,9 +177,27 @@ proc want {pat} {
 }
 spawn -noecho env TERM=xterm $bash --noprofile --rcfile $rc -i
 want "P> "
+if {$mode eq "nounset"} {
+  # The request fails to expand after the alias's `set -f`: globbing must
+  # still be back on at the next command.
+  send "set -u; how-to x \$nosuch\r"
+  want "P> "
+  send "echo GLOB-\$(\[\[ \$- == *f* \]\] && echo OFF || echo ON)\r"
+  want $marker
+  done PTY-OK
+}
 send "how-to x\r"
 want "\033\[5n"
-if {$mode eq "none"} {
+if {$mode eq "ctrlc"} {
+  # Interrupt the wait for a reply that never comes: the tty is restored.
+  after 300
+  send "\003"
+  want "P> "
+  send "head -1\r"
+  after 300
+  send "zzz\r"
+  want "zzz\r\nzzz"
+} elseif {$mode eq "none"} {
   # Never answer: the command is printed, and the tty is cooked with echo again.
   want "$marker\r\n"
   want "P> "
@@ -206,6 +230,8 @@ EOF
   assert_eq "pty: slow reply" PTY-OK "$(pty 0.3 INSERTED-42 'echo INSERTED-$((6*7))')"
   assert_eq "pty: multi-line" PTY-OK "$(pty 0   B-2 $'echo A \\\n  && echo B-$((1+1))')"
   assert_eq "pty: no reply"   PTY-OK "$(pty none 'echo NOREPLY-$((1+1))' 'echo NOREPLY-$((1+1))')"
+  assert_eq "pty: ctrl-c restores tty" PTY-OK "$(pty ctrlc x 'echo NOREPLY')"
+  assert_eq "pty: glob back after expansion error" PTY-OK "$(pty nounset GLOB-ON 'echo x')"
 else
   echo 'skip pty (no expect)'
 fi

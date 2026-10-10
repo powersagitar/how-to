@@ -74,10 +74,13 @@ survive re-sourcing.
   `[[ -v ]]`, which is false for an empty array).
 - `alias how-to='_how_to_f=$-; set -f; _how_to_main'`, defined last.
   `_how_to_main` restores globbing *before* `local -`, so every return path
-  leaves it restored.
+  leaves it restored. If a request word fails to expand (e.g. `$1` under `set -u`),
+  `_how_to_main` never runs; `_how_to_restore_glob`, appended once to
+  `PROMPT_COMMAND` in interactive shells, undoes the `set -f` at the next prompt.
 - `_how_to_push` stores the command in `_how_to_pending`, sets
   `stty -echo -icanon`, writes `\e[5n` to `/dev/tty`, polls `read -t 0` for
-  up to 1 s, and restores the tty; no reply → prints the command. The
+  up to 1 s, and restores the tty (in a subshell with an EXIT trap, so Ctrl-C
+  restores it too); no reply → prints the command. The
   terminal's `\e[0n` reply is bound (`bind -x`, emacs and vi-insert, only in
   interactive shells) to `_how_to_insert`, which sets `READLINE_LINE`.
 - pty tests drive an interactive bash with `expect`. Use the unbraced
