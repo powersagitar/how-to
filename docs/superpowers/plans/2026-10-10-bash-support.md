@@ -4,7 +4,7 @@
 
 **Goal:** A sourced bash file `src/how-to.bash` giving `how-to <request>` the same behavior as the zsh version, with the command placed on the next readline prompt via a DSR reply bound with `bind -x`.
 
-**Architecture:** One file, `src/how-to.bash`, ports `src/how-to.zsh` section by section: clean, context, providers, entry point, push. `_how_to_push` stores the command and writes `\e[5n` to the tty. The terminal's `\e[0n` reply is bound to `_how_to_insert`, which sets `READLINE_LINE`. `src/test.bash` mirrors `src/test.zsh` and adds option-leak and pty tests.
+**Architecture:** One file, `src/how-to.bash`, ports `src/how-to.zsh` section by section: clean, context, providers, entry point, push. `_how_to_push` stores the command, turns tty echo off, writes `\e[5n`, waits for the reply to be buffered, and then restores the tty. The terminal's `\e[0n` reply is bound to `_how_to_insert`, which sets `READLINE_LINE`. `src/test.bash` mirrors `src/test.zsh` and adds option-leak and pty tests.
 
 **Tech Stack:** bash ≥ 4.4, `expect` (optional, pty test only). No other dependencies.
 
@@ -112,7 +112,11 @@
 
 **Interfaces:**
 - Consumes: `_how_to_main`.
-- Produces: `_how_to_pending` (global string); `_how_to_push "$cmd"`: if `[[ $- == *i* ]]` and `printf '\e[5n' > /dev/tty` succeeds (stderr silenced), store the command in `_how_to_pending`; otherwise `printf '%s\n' "$1"`. Also `_how_to_insert` (no-op when `_how_to_pending` is empty; otherwise `READLINE_LINE=$_how_to_pending; READLINE_POINT=${#READLINE_LINE}; _how_to_pending=`) and, only when `[[ $- == *i* ]]`, `bind -m emacs -x '"\e[0n": _how_to_insert'` plus the same for `-m vi-insert`.
+- Produces: `_how_to_pending` (global string); `_how_to_push "$cmd"`:
+  - If `[[ $- == *i* ]]` and `saved=$(command stty -g </dev/tty 2>/dev/null)` succeeds: store the command in `_how_to_pending`, run `command stty -echo -icanon </dev/tty`, and `printf '\e[5n' >/dev/tty`.
+  - Then poll `read -t 0 </dev/tty` up to 100 times with `command sleep 0.01` between tries, and restore with `command stty "$saved" </dev/tty`.
+  - If the reply never showed up, clear `_how_to_pending` and fall through to printing.
+  - Otherwise (non-interactive, no tty, or no reply), `printf '%s\n' "$1"`. Also `_how_to_insert` (no-op when `_how_to_pending` is empty; otherwise `READLINE_LINE=$_how_to_pending; READLINE_POINT=${#READLINE_LINE}; _how_to_pending=`) and, only when `[[ $- == *i* ]]`, `bind -m emacs -x '"\e[0n": _how_to_insert'` plus the same for `-m vi-insert`.
 - Note: tests source the file again in a fresh subshell so they get the real `_how_to_push`, not Task 3's stub.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -121,7 +125,11 @@
   - `insert: no-op when empty` → `READLINE_LINE=keep`, call `_how_to_insert`, and `READLINE_LINE` is still `keep`
   - `source: silent non-interactive` → `"$BASH" -c "source '$here/how-to.bash'" 2>&1` is empty
   - `bind: emacs` and `bind: vi-insert` → `"$BASH" --norc -ic "source '$here/how-to.bash'; bind -m emacs -X"` contains `"\e[0n": "_how_to_insert"`, and the same for vi-insert
-  - `pty: inserted` and `pty: multi-line` → when `type -P expect` succeeds, run an expect script written to `$tmp/pty.exp`. It spawns `$BASH --noprofile --norc -i`, sets `PS1='P> '`, sources the file, defines a stub provider that prints `echo INSERTED-$((6*7))` (multi-line case: `echo A \` / `  && echo B-$((1+1))`), and runs `how-to x`. When `-ex "\033\[5n"` matches, it sends `"\033\[0n"`, waits for `P> `, sends `\r`, and expects `INSERTED-42` (multi-line: `B-2`). The script prints `PTY-OK` or `PTY-FAIL`. Without `expect`, print `skip pty (no expect)`. (Spike lesson: use `-ex` for the escape-sequence match, because glob patterns mangle `[`.)
+  - pty tests: when `type -P expect` succeeds, generate an expect script in `$tmp/pty.exp`, parameterized by the stub output and the reply delay. Without `expect`, print `skip pty (no expect)`. The script spawns `$BASH --noprofile --norc -i`, sets `PS1='P> '`, sources the file, defines a stub provider, and runs `how-to x`. When `-ex "\033\[5n"` matches, it optionally sleeps, then sends `"\033\[0n"`, waits for `P> `, sends `\r`, and expects the marker. It prints `PTY-OK`, `PTY-FAIL`, or `PTY-ECHOED`; the last one fires if the captured output contains `\033[0n` (check with `string first`). Spike lessons: use `-ex` for escape-sequence matches, because glob patterns mangle `[`, and generate the `.exp` with the `$BASH` path substituted in.
+    - `pty: inserted` → stub prints `echo INSERTED-$((6*7))`, reply immediately, expect `INSERTED-42`, result `PTY-OK`
+    - `pty: slow reply` → same, but the reply comes after `sleep 0.3`, result `PTY-OK`
+    - `pty: multi-line` → stub prints `echo A \` / `  && echo B-$((1+1))`, expect `B-2`, result `PTY-OK`
+    - `pty: no reply` → never answer. Expect the stub command printed on its own line, then `P> `. Then send `echo TYPED\r` and expect the literal `echo TYPED` echoed back (tty restored) followed by `TYPED`, result `PTY-OK`. This takes about 1 s.
 
 - [ ] **Step 2: Run.** Expected: the new tests FAIL.
 
@@ -136,7 +144,7 @@
 **Files:**
 - Modify: `docs/usage.md`, `CLAUDE.md`, `docs/superpowers/specs/2026-10-10-how-to-design.md` (Scope "Later" bullet), `README.md` (mention bash if it says zsh-only)
 
-- [ ] **Step 1: `docs/usage.md`.** Add a "bash" install subsection: `source /path/to/how-to/src/how-to.bash` in `~/.bashrc`; requires bash ≥ 4.4 (macOS `/bin/bash` is 3.2, so use `brew install bash`); explain how the command reaches the prompt (DSR reply) and give the check `printf '\e[5n'; IFS= read -rs -t1 -d n r && echo ok || echo 'no DSR reply'`; non-interactive shells print the command instead. Quoting: `how-to` disables globbing for the request, like zsh. Give a bash example of the ollama provider (`_how_to_provider_ollama() { { printf '%s\n' "$1"; cat; } | ollama run llama3.2; }`) and of the docker context provider. Mention that `HOW_TO_CONTEXT+=(docker)` works in both shells.
+- [ ] **Step 1: `docs/usage.md`.** Add a "bash" install subsection: `source /path/to/how-to/src/how-to.bash` in `~/.bashrc`; requires bash ≥ 4.4 (macOS `/bin/bash` is 3.2, so use `brew install bash`); explain how the command reaches the prompt (DSR reply) and give the check `s=$(stty -g); stty -echo; printf '\e[5n'; IFS= read -rs -t1 -d n r && echo ok || echo 'no DSR reply'; stty "$s"`; if the terminal doesn't reply within 1 s, or the shell isn't interactive, the command is printed instead. Quoting: `how-to` disables globbing for the request, like zsh. Give a bash example of the ollama provider (`_how_to_provider_ollama() { { printf '%s\n' "$1"; cat; } | ollama run llama3.2; }`) and of the docker context provider. Mention that `HOW_TO_CONTEXT+=(docker)` works in both shells.
 - [ ] **Step 2: `CLAUDE.md`.** Add `/opt/homebrew/bin/bash src/test.bash` (any bash ≥ 4.4) to Commands. Add a "bash conventions" list: `local -`, the shopt save/restore rule, `command`, the alias and its restore-first rule, the DSR push and `_how_to_insert`, and that the system prompt must stay identical across both files (tested).
 - [ ] **Step 3: Old spec.** Replace the bash "Later" bullet with a pointer to `2026-10-10-bash-support-design.md`.
 - [ ] **Step 4: Verify** both suites pass: `zsh src/test.zsh; /opt/homebrew/bin/bash src/test.bash`, exit 0 each.

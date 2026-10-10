@@ -51,9 +51,17 @@ src/test.bash       test script: `bash src/test.bash`
 Bash has no `print -z`, and `TIOCSTI` is disabled. The terminal is made to
 "type" a key sequence that readline maps to a shell function:
 
-1. `_how_to_push "$cmd"` stores `$cmd` in `_how_to_pending` and writes the
-   Device Status Report query `\e[5n` to `/dev/tty`.
-2. The terminal replies `\e[0n` ("OK") on the tty's input.
+1. `_how_to_push "$cmd"` stores `$cmd` in `_how_to_pending`, saves the tty
+   settings (`command stty -g`), sets `command stty -echo -icanon`, and writes
+   the Device Status Report query `\e[5n` to `/dev/tty`.
+2. The terminal replies `\e[0n` ("OK") on the tty's input. `_how_to_push`
+   polls `read -t 0 </dev/tty` (checks without consuming) every 10 ms, for up
+   to 1 s, until the reply is buffered, then restores the saved tty settings.
+   - Without `-echo`, the cooked tty would echo the reply as `^[[0n` above
+     the prompt, because it arrives before readline switches to raw mode.
+   - Without `-icanon`, `read -t 0` can't see input that has no newline.
+   - If no reply arrives within 1 s, `_how_to_pending` is cleared and the
+     command is printed to stdout so it isn't lost.
 3. Once readline is reading the next prompt it sees `\e[0n`, bound at
    source time with
    `bind -m emacs -x '"\e[0n": _how_to_insert'` (and the same for
@@ -62,10 +70,16 @@ Bash has no `print -z`, and `TIOCSTI` is disabled. The terminal is made to
    `READLINE_POINT=${#READLINE_LINE}`, and clears `_how_to_pending`. If nothing
    is pending it does nothing, so a stray DSR reply is harmless.
 
-A spike (bash 5.3, pty driven by `expect` acting as the terminal) confirmed
-steps 3–4 work both when the reply arrives at an idle prompt and when it
-arrives early, while the function is still running: the bytes wait in the tty
-buffer until readline reads them.
+A spike (bash 5.3 on macOS, pty driven by `expect` acting as the terminal)
+confirmed:
+- Steps 3–4 work whether the reply arrives at an idle prompt or early, while
+  the function is still running: the bytes wait in the tty buffer until
+  readline reads them, including across the `-icanon` → `icanon` restore.
+- With step 1–2's `stty` handling, the reply is not echoed for an immediate
+  reply or a 300 ms one (SSH-like). With no reply, the wait times out after
+  about 1 s and the tty is restored.
+- A check in the user's own terminal showed the plain trick echoes
+  `^[[0n`, which is what motivated the `stty` handling.
 
 Bindings are installed only in interactive shells (`[[ $- == *i* ]]`). When
 the shell isn't interactive or `/dev/tty` can't be opened, `_how_to_push`
@@ -77,7 +91,7 @@ under `HISTCONTROL`. Instead the docs give a one-line check that the terminal
 answers DSR (xterm, iTerm2, Terminal.app, kitty, VS Code, and tmux all do):
 
 ```
-printf '\e[5n'; IFS= read -rs -t1 -d n r && echo ok || echo 'no DSR reply'
+s=$(stty -g); stty -echo; printf '\e[5n'; IFS= read -rs -t1 -d n r && echo ok || echo 'no DSR reply'; stty "$s"
 ```
 
 ## Globbing in requests
@@ -176,10 +190,13 @@ Bash-specific:
   `zsh -c 'source src/how-to.zsh; print -rn -- $HOW_TO_SYSTEM_PROMPT'`;
   skipped with a note if `zsh` is absent.
 - `_how_to_push` falls back to stdout when non-interactive.
-- pty test with `expect`: interactive bash sources the file, runs `how-to`
-  with a stub provider; expect answers `\e[5n` with `\e[0n`, presses Enter,
-  and checks the stubbed command ran. Skipped with a note if `expect` is
-  absent.
+- pty tests with `expect` (skipped with a note if `expect` is absent):
+  interactive bash sources the file and runs `how-to` with a stub provider.
+  - Reply: expect answers `\e[5n` with `\e[0n` (immediately and after
+    300 ms), presses Enter, and checks that the stubbed command ran and that
+    `\e[0n` never appeared in the output.
+  - No reply: the command is printed, nothing is inserted, and echo works
+    again afterward (a typed command is echoed).
 
 Automated tests make no network calls; the real claude provider is checked
 manually once.
