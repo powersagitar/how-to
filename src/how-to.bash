@@ -51,6 +51,59 @@ _how_to_clean() {
 declare -p HOW_TO_CONTEXT &>/dev/null || HOW_TO_CONTEXT=(os shell cwd git tools)
 declare -p HOW_TO_TOOLS &>/dev/null   || HOW_TO_TOOLS=(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)
 
+_how_to_context_os()    { local -; printf '%s\n' "os: $(command uname -sr)"; }
+_how_to_context_shell() { local -; printf '%s\n' "shell: bash $BASH_VERSION"; }
+
+_how_to_context_cwd() {
+  local -
+  local IFS=$' \t\n' files
+  local opts; opts=$(shopt -p nocasematch nullglob dotglob failglob extglob) || :
+  shopt -s nullglob dotglob; shopt -u failglob
+  files=(*)
+  eval "$opts"
+  printf '%s\n' "cwd: $PWD"
+  (( ${#files[@]} )) && printf '%s\n' "files: ${files[*]:0:30}"
+  return 0
+}
+
+_how_to_context_git() {
+  local -
+  local root branch
+  root=$(command git rev-parse --show-toplevel 2>/dev/null) || return 0
+  printf '%s\n' "git_root: $root"
+  # symbolic-ref works before the first commit; prints nothing when detached
+  branch=$(command git symbolic-ref --short -q HEAD 2>/dev/null) || :
+  [[ -n $branch ]] && printf '%s\n' "git_branch: $branch"
+  return 0
+}
+
+_how_to_context_tools() {
+  local -
+  local IFS=$' \t\n' t list found=()
+  read -ra list <<< "${HOW_TO_TOOLS[*]-}"
+  for t in "${list[@]}"; do
+    type -P "$t" >/dev/null && found+=("$t")
+  done
+  (( ${#found[@]} )) && printf '%s\n' "tools: ${found[*]}"
+  return 0
+}
+
+# Print the <context> block built from HOW_TO_CONTEXT. Missing or failing
+# providers contribute nothing. A space-separated string works as well as an
+# array.
+_how_to_context() {
+  local -
+  local IFS=$' \t\n' name out list
+  read -ra list <<< "${HOW_TO_CONTEXT[*]-}"
+  printf '%s\n' '<context>'
+  for name in "${list[@]}"; do
+    declare -F "_how_to_context_$name" >/dev/null || continue
+    out=$("_how_to_context_$name" 2>/dev/null) || continue
+    [[ -n $out ]] && printf '%s\n' "$out"
+  done
+  printf '%s\n' '</context>'
+}
+
 # --- providers ---------------------------------------------------------------
 # A provider is _how_to_provider_<name>: $1 = system prompt, stdin = user
 # message, stdout = raw reply, non-zero exit on failure. Select one with
