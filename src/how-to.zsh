@@ -60,3 +60,58 @@ _how_to_context() {
   done
   print -r -- '</context>'
 }
+
+# --- providers ---------------------------------------------------------------
+# A provider is _how_to_provider_<name>: $1 = system prompt, stdin = user
+# message, stdout = raw reply, non-zero exit on failure. Select one with
+# HOW_TO_PROVIDER=<name>.
+(( ${+HOW_TO_SYSTEM_PROMPT} )) || HOW_TO_SYSTEM_PROMPT='You convert a request into a single shell command for the user'"'"'s environment
+described in <context>.
+Output ONLY the command: no explanation, no markdown, no code fences.
+Prefer tools listed in "tools:" when they fit; otherwise use standard POSIX/
+OS-native utilities.
+Use a single line; chain with && or | when needed.
+Do not refuse destructive commands; the user reviews before running.
+If the request cannot be done with a shell command, output exactly:
+HOWTO_FAIL: <short reason>'
+
+_how_to_provider_claude() {
+  command claude --print --tools "" --no-session-persistence \
+    --system-prompt "$1" ${=HOW_TO_CLAUDE_ARGS:---model haiku}
+}
+
+# --- entry point -------------------------------------------------------------
+_how_to_push() { print -z -- "$1" }
+
+function how-to {
+  if (( ! $# )); then
+    print -u2 'usage: how-to <what you want to do>'
+    return 2
+  fi
+  local name=${HOW_TO_PROVIDER:-claude}
+  local fn=_how_to_provider_$name
+  if (( ! $+functions[$fn] )); then
+    print -u2 -r -- "how-to: unknown provider '$name'"
+    return 1
+  fi
+
+  local msg raw cmd
+  msg="$(_how_to_context)"$'\n'"Request: $*"
+  if ! raw=$(print -r -- "$msg" | $fn "$HOW_TO_SYSTEM_PROMPT"); then
+    print -u2 'how-to: provider failed'
+    return 1
+  fi
+  cmd=$(print -r -- "$raw" | _how_to_clean)
+  if [[ -z $cmd ]]; then
+    print -u2 'how-to: no command returned'
+    return 1
+  fi
+  if [[ $cmd == HOWTO_FAIL:* ]]; then
+    print -u2 -r -- "${${cmd#HOWTO_FAIL:}# }"
+    return 1
+  fi
+  _how_to_push "$cmd"
+}
+
+# Keep globs like *.log in the request from being expanded by the shell.
+alias how-to='noglob how-to'
