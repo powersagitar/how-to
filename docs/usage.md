@@ -27,8 +27,16 @@ the request isn't something a shell command can do, the reason is printed
 and your prompt stays empty.
 
 `how-to` is aliased to `noglob how-to`, so `*.log` and friends in your
-request are passed through as words. Quote the request if it contains other
-shell syntax (`|`, `;`, `>`, `&`).
+request are passed through as words. Everything else is still parsed by your
+shell before `how-to` sees it, so single-quote the request when it contains
+apostrophes, quotes, `$`, `#`, `|`, `;`, `>`, `<` or `&`:
+
+```
+$ how-to 'what'"'"'s using port 8080'     # or: how-to what is using port 8080
+$ how-to 'files > 100MB in $HOME'
+```
+
+`how-to` itself never evaluates the request; it is sent to the model as text.
 
 ## Configuration
 

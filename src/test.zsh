@@ -82,4 +82,18 @@ assert_eq "claude argv" $'--print|--tools||--no-session-persistence|--system-pro
 assert_eq "claude args override" $'--print|--tools||--no-session-persistence|--system-prompt|SYS|--model|sonnet|\nIN' \
   "$(PATH=$tmp/bin:$PATH; HOW_TO_CLAUDE_ARGS='--model sonnet'; print IN | _how_to_provider_claude SYS)"
 
+# --- review fixes
+assert_eq "push: backslashes kept" 'printf %s\n a\tb' "$(
+  source $here/how-to.zsh; _how_to_push 'printf %s\n a\tb'; read -rz x; print -r -- "$x")"
+assert_eq "ksharrays: clean" 'ls' "$(setopt ksharrays; print -r -- $'```\nls\n```' | _how_to_clean)"
+assert_eq "ksharrays: ctx" $'<context>\na: 1\nb: 2\n</context>' "$(setopt ksharrays
+  _how_to_context_a() { print 'a: 1' }; _how_to_context_b() { print 'b: 2' }
+  HOW_TO_CONTEXT=(a b); _how_to_context 2>&1)"
+stub_out='ls'; ( setopt ksharrays; run x; print -r -- "$pushed" > $tmp/ksh )
+assert_eq "ksharrays: e2e" 'ls' "$(<$tmp/ksh)"
+assert_eq "clean: prose around fence" 'fd -e log' \
+  "$(print -r -- $'Here is the command:\n```bash\nfd -e log\n```\nThis finds logs.' | _how_to_clean)"
+stub_out=$'Sorry.\nHOWTO_FAIL: no'; run x
+assert_eq "fail on later line msg" 'no' "$err"; assert_eq "fail on later line not pushed" '' "$pushed"
+
 exit $(( failures > 0 ))
