@@ -24,10 +24,8 @@ Success criteria:
 ## Scope
 
 - **In:** zsh.
-- **Later (not now):** bash, as a separate `src/how-to.bash` reusing the same
-  provider/context conventions and system prompt. Bash would use
-  `read -e -i` (editable line, Enter runs) since it has no `print -z`. The
-  zsh file is free to use zsh idioms.
+- **Later:** bash, as a separate `src/how-to.bash`; see
+  `2026-10-10-bash-support-design.md`. The zsh file is free to use zsh idioms.
 - **Out:** fish, built-in HTTP providers, command history/caching, explaining
   commands, auto-execution.
 

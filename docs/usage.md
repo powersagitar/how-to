@@ -15,6 +15,32 @@ line editor.
 
 The default provider needs `claude` on your `PATH` and logged in.
 
+### bash
+
+Add to `~/.bashrc`:
+
+```bash
+source /path/to/how-to/src/how-to.bash
+```
+
+Requires bash 4.4 or newer. macOS ships bash 3.2 as `/bin/bash`; install a
+current one with `brew install bash`. On an older bash, sourcing prints a
+one-line notice and defines nothing, so a shared `.bashrc` keeps working.
+
+bash has no `print -z`, so the command reaches your prompt through the
+terminal: `how-to` sends a Device Status Report query (`\e[5n`), the terminal
+answers `\e[0n`, and that answer is bound to a readline function that fills in
+the prompt. xterm, iTerm2, Terminal.app, kitty, VS Code and tmux all answer.
+To check yours:
+
+```bash
+s=$(stty -g); stty -echo; printf '\e[5n'; IFS= read -rs -t1 -d n r && echo ok || echo 'no DSR reply'; stty "$s"
+```
+
+If the terminal doesn't answer within 1 s, or the shell isn't interactive, the
+command is printed instead of placed on the prompt. Both emacs and vi
+(`set -o vi`) editing modes work.
+
 ## Use
 
 ```
@@ -38,9 +64,19 @@ $ how-to 'files > 100MB in $HOME'
 
 `how-to` itself never evaluates the request; it is sent to the model as text.
 
+In bash, `how-to` is an alias that turns globbing off before your words are
+expanded (`_how_to_f=$-; set -f; _how_to_main`), so globs pass through the
+same way. The quoting advice above applies too. Because the alias is several
+commands joined by `;`:
+
+- `HOW_TO_PROVIDER=ollama how-to ...` sets the variable for the rest of the
+  session, not just this call (a subshell can't fill your prompt, so there is
+  no one-off form; set it and change it back).
+- Don't chain it: `cond && how-to ...` runs `how-to` even when `cond` fails.
+
 ## Configuration
 
-Set these in `~/.zshrc` (before or after sourcing).
+Set these in `~/.zshrc` or `~/.bashrc` (before or after sourcing).
 
 | variable | default | purpose |
 |----------|---------|---------|
@@ -51,10 +87,13 @@ Set these in `~/.zshrc` (before or after sourcing).
 | `HOW_TO_SYSTEM_PROMPT` | see `src/how-to.zsh` | rules sent to the model |
 
 `HOW_TO_CONTEXT` and `HOW_TO_TOOLS` can be arrays or space-separated strings.
+In bash, set a string only before sourcing; after sourcing they are arrays,
+and assigning a string replaces just the first element. Appending with
+`HOW_TO_CONTEXT+=(docker)` works in both shells.
 
 ## Writing a provider
 
-A provider is a zsh function named `_how_to_provider_<name>`:
+A provider is a shell function named `_how_to_provider_<name>`:
 
 - `$1` — the system prompt
 - stdin — the user message (context block and request)
@@ -68,12 +107,19 @@ _how_to_provider_ollama() { { print -r -- "$1"; cat } | ollama run llama3.2 }
 HOW_TO_PROVIDER=ollama
 ```
 
+The same in bash:
+
+```bash
+_how_to_provider_ollama() { { printf '%s\n' "$1"; cat; } | ollama run llama3.2; }
+HOW_TO_PROVIDER=ollama
+```
+
 To report that a request can't be done, the model replies
 `HOWTO_FAIL: <reason>`; the default system prompt asks for this.
 
 ## Writing a context provider
 
-A context provider is a zsh function named `_how_to_context_<name>` that
+A context provider is a shell function named `_how_to_context_<name>` that
 prints zero or more `key: value` lines. Output is collected into a
 `<context>` block sent before the request. A provider that fails or prints
 nothing is skipped.
@@ -86,10 +132,21 @@ _how_to_context_docker() {
 HOW_TO_CONTEXT+=(docker)
 ```
 
+The same in bash:
+
+```bash
+_how_to_context_docker() {
+  type -P docker >/dev/null || return
+  printf '%s\n' "containers: $(docker ps --format '{{.Names}}' | tr '\n' ' ')"
+}
+HOW_TO_CONTEXT+=(docker)
+```
+
 Keep providers fast; they run on every call.
 
 ## Tests
 
 ```
 zsh src/test.zsh
+bash src/test.bash     # any bash >= 4.4; uses expect for pty tests if installed
 ```

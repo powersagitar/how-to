@@ -8,7 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 and places it on the user's prompt with `print -rz`, unexecuted. All the code is
 in `src/how-to.zsh`, which is meant to be sourced from `~/.zshrc`. It must be
 sourced, not run as a script, because a child process can't write to the
-parent shell's line editor. User docs are in `docs/usage.md`; the design spec
+parent shell's line editor. `src/how-to.bash` is the bash port (bash >= 4.4)
+with the same pipeline; see "bash conventions" below. User docs are in `docs/usage.md`; the design spec
 is in `docs/superpowers/specs/`.
 
 ## Commands
@@ -17,6 +18,7 @@ is in `docs/superpowers/specs/`.
 zsh src/test.zsh                    # full suite; exit 1 if any FAIL
 zsh src/test.zsh | grep -v '^ok'    # show only failures
 zsh src/test.zsh | grep 'git:'      # one group (no runner; filter by test name)
+/opt/homebrew/bin/bash src/test.bash # bash suite; any bash >= 4.4 (macOS /bin/bash is 3.2)
 ```
 
 There is no build or lint step. Tests are flat `assert_eq "<name>" expected actual` calls.
@@ -56,6 +58,31 @@ survive re-sourcing.
   `local`/`typeset`, because it breaks array-assignment syntax.
 - `how-to` is defined as `function how-to {` (so it re-sources cleanly) and
   aliased to `noglob how-to`.
+
+## bash conventions (`src/how-to.bash`, enforced by `src/test.bash`)
+
+- Same pipeline, names, messages and defaults as the zsh file; the entry
+  function is `_how_to_main`. `HOW_TO_SYSTEM_PROMPT` must stay byte-identical
+  across both files (tested against zsh).
+- Every function starts with `local -`; functions that split or join words
+  use `local IFS=$' \t\n'`. A function that pattern-matches or globs saves
+  `shopt -p nocasematch nullglob dotglob failglob extglob`, sets what it
+  needs, and `eval`s the saved value before returning. Code must work under
+  `set -euo pipefail`, `failglob`, `nocasematch` and an odd `IFS` (tested).
+- External programs go through `command`; tool detection uses `type -P`.
+  Config is set only if unset with `declare -p VAR &>/dev/null ||` (not
+  `[[ -v ]]`, which is false for an empty array).
+- `alias how-to='_how_to_f=$-; set -f; _how_to_main'`, defined last.
+  `_how_to_main` restores globbing *before* `local -`, so every return path
+  leaves it restored.
+- `_how_to_push` stores the command in `_how_to_pending`, sets
+  `stty -echo -icanon`, writes `\e[5n` to `/dev/tty`, polls `read -t 0` for
+  up to 1 s, and restores the tty; no reply → prints the command. The
+  terminal's `\e[0n` reply is bound (`bind -x`, emacs and vi-insert, only in
+  interactive shells) to `_how_to_insert`, which sets `READLINE_LINE`.
+- pty tests drive an interactive bash with `expect`. Use the unbraced
+  `expect -ex $pat {...} timeout {...}` form (a one-line braced body is
+  treated as a single pattern) and `-ex` for escape sequences.
 
 ## Testing notes
 
