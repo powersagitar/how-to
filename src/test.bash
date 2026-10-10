@@ -85,4 +85,61 @@ git -C "$tmp/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m x
 git -C "$tmp/repo" checkout -q --detach
 assert_eq "git: no branch when detached" "git_root: $(cd "$tmp" && pwd -P)/repo" "$(cd "$tmp/repo" && _how_to_context_git)"
 
+# --- how-to end to end (stub provider, captured push)
+shopt -s expand_aliases
+_how_to_push() { pushed=$1; }
+_how_to_provider_stub() {
+  printf '%s\n' "$1" > "$tmp/sys"; cat > "$tmp/in"
+  printf '%s\n' "$stub_out"; return "${stub_rc:-0}"
+}
+HOW_TO_PROVIDER=stub
+HOW_TO_CONTEXT=()
+run() { pushed=; _how_to_main "$@" 2>"$tmp/err" >/dev/null; rc=$?; err=$(<"$tmp/err"); }
+last_in() { local s; s=$(<"$tmp/in"); printf '%s\n' "${s##*$'\n'}"; }
+globf() { printf '%s' "${-//[^f]/}"; }
+
+stub_out='tokei .'; run lines of code
+assert_eq "e2e: pushed"   'tokei .' "$pushed"
+assert_eq "e2e: rc"       0 "$rc"
+assert_eq "e2e: request"  'Request: lines of code' "$(last_in)"
+assert_eq "e2e: sys"      "$HOW_TO_SYSTEM_PROMPT" "$(<"$tmp/sys")"
+assert_eq "e2e: ctx block first" '<context>' "$(head -1 "$tmp/in")"
+
+stub_out='x'; run 'replace "foo" with $bar'
+assert_eq "literal request" 'Request: replace "foo" with $bar' "$(last_in)"
+touch "$tmp/x.nomatch"; cd "$tmp"
+stub_out=x; eval 'how-to find all *.nomatch files' 2>/dev/null
+assert_eq "noglob request" 'Request: find all *.nomatch files' "$(last_in)"
+assert_eq "glob restored" '' "$(globf)"
+cd "$here"
+set -f; eval 'how-to x' >/dev/null 2>&1; f=$(globf); set +f
+assert_eq "glob kept off" f "$f"
+eval 'how-to' 2>/dev/null; a=$(globf)
+HOW_TO_PROVIDER=nope; eval 'how-to x' 2>/dev/null; b=$(globf); HOW_TO_PROVIDER=stub
+stub_out='HOWTO_FAIL: x'; eval 'how-to x' 2>/dev/null; c=$(globf)
+assert_eq "glob restored on error" '||' "$a|$b|$c"
+assert_eq "re-source ok" '' "$(source "$here/how-to.bash" 2>&1)"
+
+run;                          assert_eq "no args rc" 2 "$rc"; assert_eq "no args msg" 'usage: how-to <what you want to do>' "$err"
+HOW_TO_PROVIDER=nope run x;   assert_eq "unknown rc" 1 "$rc"; assert_eq "unknown msg" "how-to: unknown provider 'nope'" "$err"
+stub_out=''; stub_rc=1; run x; assert_eq "prov fail rc" 1 "$rc"; assert_eq "prov fail msg" 'how-to: provider failed' "$err"; stub_rc=0
+stub_out=$'```\n```'; run x;  assert_eq "empty rc" 1 "$rc"; assert_eq "empty msg" 'how-to: no command returned' "$err"
+stub_out='HOWTO_FAIL: not a shell task'; run x
+assert_eq "fail rc" 1 "$rc"; assert_eq "fail msg" 'not a shell task' "$err"; assert_eq "fail not pushed" '' "$pushed"
+stub_out=$'```\nHOWTO_FAIL: nope\n```'; run x
+assert_eq "fenced fail msg" 'nope' "$err"; assert_eq "fenced fail not pushed" '' "$pushed"
+stub_out=$'Sorry.\nHOWTO_FAIL: no'; run x
+assert_eq "fail on later line msg" 'no' "$err"; assert_eq "fail on later line not pushed" '' "$pushed"
+stub_out='ls'; ( set -euo pipefail; shopt -s failglob nocasematch; IFS=:; run x; printf '%s\n' "$pushed" > "$tmp/hostile" )
+assert_eq "e2e: hostile opts" 'ls' "$(<"$tmp/hostile")"
+stub_out='howto_fail: x'; ( shopt -s nocasematch; run x; printf '%s\n' "$pushed" > "$tmp/nocase" )
+assert_eq "fail: case-sensitive under nocasematch" 'howto_fail: x' "$(<"$tmp/nocase")"
+
+# --- claude provider argv (fake executable; `command` bypasses functions)
+mkdir "$tmp/bin"; printf '%s\n' '#!/bin/sh' 'printf "%s|" "$@"; echo; cat' > "$tmp/bin/claude"; chmod +x "$tmp/bin/claude"
+assert_eq "claude argv" $'--print|--tools||--no-session-persistence|--system-prompt|SYS|--model|haiku|\nIN' \
+  "$(PATH=$tmp/bin:$PATH; echo IN | _how_to_provider_claude SYS)"
+assert_eq "claude args override" $'--print|--tools||--no-session-persistence|--system-prompt|SYS|--model|sonnet|\nIN' \
+  "$(PATH=$tmp/bin:$PATH; HOW_TO_CLAUDE_ARGS='--model sonnet'; echo IN | _how_to_provider_claude SYS)"
+
 exit $(( failures > 0 ))

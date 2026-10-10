@@ -117,3 +117,62 @@ Use a single line; chain with && or | when needed.
 Do not refuse destructive commands; the user reviews before running.
 If the request cannot be done with a shell command, output exactly:
 HOWTO_FAIL: <short reason>'
+
+_how_to_provider_claude() {
+  local -
+  local IFS=$' \t\n' args
+  read -ra args <<< "${HOW_TO_CLAUDE_ARGS[*]:---model haiku}"
+  command claude --print --tools "" --no-session-persistence \
+    --system-prompt "$1" "${args[@]}"
+}
+
+# --- entry point -------------------------------------------------------------
+# Called through the how-to alias below, which saves $- in _how_to_f and turns
+# globbing off before the request words are expanded.
+_how_to_main() {
+  # Restore globbing before `local -`, so every return path keeps it restored.
+  [[ ${_how_to_f-} == *f* ]] || set +f
+  unset _how_to_f
+  local -
+  local IFS=$' \t\n'
+  if (( ! $# )); then
+    printf '%s\n' 'usage: how-to <what you want to do>' >&2
+    return 2
+  fi
+  local name=${HOW_TO_PROVIDER:-claude}
+  local fn=_how_to_provider_$name
+  if ! declare -F "$fn" >/dev/null; then
+    printf '%s\n' "how-to: unknown provider '$name'" >&2
+    return 1
+  fi
+
+  local msg raw cmd l fail found=
+  msg="$(_how_to_context)"$'\n'"Request: $*"
+  if ! raw=$(printf '%s\n' "$msg" | "$fn" "$HOW_TO_SYSTEM_PROMPT"); then
+    printf '%s\n' 'how-to: provider failed' >&2
+    return 1
+  fi
+  cmd=$(printf '%s\n' "$raw" | _how_to_clean)
+  if [[ -z $cmd ]]; then
+    printf '%s\n' 'how-to: no command returned' >&2
+    return 1
+  fi
+  local opts; opts=$(shopt -p nocasematch nullglob dotglob failglob extglob) || :
+  shopt -u nocasematch
+  while IFS= read -r l; do
+    if [[ $l == HOWTO_FAIL:* ]]; then
+      fail=${l#HOWTO_FAIL:} found=1
+      break
+    fi
+  done <<< "$cmd"
+  eval "$opts"
+  if [[ -n $found ]]; then
+    printf '%s\n' "${fail# }" >&2
+    return 1
+  fi
+  _how_to_push "$cmd"
+}
+
+# Keep globs like *.log in the request from being expanded by the shell.
+# Defined last, so no `how-to` above is alias-expanded.
+alias how-to='_how_to_f=$-; set -f; _how_to_main'
