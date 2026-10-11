@@ -26,6 +26,12 @@ CI (`.github/workflows/test.yml`, every push) runs both suites on Ubuntu with
 expect: zsh once, and bash 4.4.18 and 5.0 (built from source) plus the runner's
 /bin/bash. A failing pty test prints the end of its transcript.
 
+Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml` instead: it calls
+`test.yml` (`workflow_call`), and if every job passes it creates a GitHub
+release with `how-to-X.Y.Z.tar.gz`, its `.sha256`, and `how-to.rb`, the
+Homebrew formula rendered from `.github/homebrew/how-to.rb`. The formula's
+`test do` sources both files (bash via Homebrew's bash, since macOS has 3.2).
+
 There is no build or lint step. Tests are flat `assert_eq "<name>" expected actual` calls.
 
 ## Architecture

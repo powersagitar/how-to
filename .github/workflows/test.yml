@@ -1,7 +1,10 @@
 name: test
 
+# Tag pushes are tested by release.yml, which calls this workflow.
 on:
   push:
+    branches: ['**']
+  workflow_call:
   workflow_dispatch:
 
 permissions:
