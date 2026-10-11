@@ -22,6 +22,10 @@ zsh src/test.zsh | grep 'git:'      # one group (no runner; filter by test name)
 /opt/homebrew/bin/bash src/test.bash # bash suite; any bash >= 4.4 (macOS /bin/bash is 3.2)
 ```
 
+CI (`.github/workflows/test.yml`, every push) runs both suites on Ubuntu with
+expect: zsh once, and bash 4.4.18 and 5.0 (built from source) plus the runner's
+/bin/bash. A failing pty test prints the end of its transcript.
+
 There is no build or lint step. Tests are flat `assert_eq "<name>" expected actual` calls.
 
 ## Architecture

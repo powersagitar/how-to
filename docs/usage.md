@@ -176,3 +176,7 @@ Keep providers fast; they run on every call.
 zsh src/test.zsh
 bash src/test.bash     # any bash >= 4.4; uses expect for pty tests if installed
 ```
+
+CI (`.github/workflows/test.yml`) runs both suites on every push, with expect
+installed, on Ubuntu: zsh, and bash 4.4.18 and 5.0 (built from source) plus the
+runner's /bin/bash.
