@@ -1,0 +1,88 @@
+name: test
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# Each test step streams the suite's output, then repeats the FAIL lines (with
+# expected/actual) at the end and as annotations. Skipped pty or zsh-prompt
+# tests fail the step: CI installs expect and zsh so that they run.
+
+jobs:
+  zsh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install zsh and expect
+        run: sudo apt-get update -q && sudo apt-get install -yq zsh expect
+      - name: zsh src/test.zsh
+        run: |
+          zsh --version
+          out=$RUNNER_TEMP/out
+          rc=0; zsh src/test.zsh 2>&1 | tee "$out" || rc=$?
+          if grep -E '^skip (pty|prompt)' "$out"; then echo '::error::tests skipped'; rc=1; fi
+          if (( rc )); then
+            echo "--- failures (exit $rc)"; grep -v '^ok' "$out" || :
+            sed -n 's/^FAIL /::error title=zsh::FAIL /p' "$out"
+          fi
+          exit "$rc"
+
+  bash:
+    name: bash ${{ matrix.bash }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - bash: '4.4.18'
+            sha256: 604d9eec5e4ed5fd2180ee44dd756ddca92e0b6aa4217bbab2b6227380317f23
+          - bash: '5.0'
+            sha256: b4a80f2ac66170b2913efbfb9f2594f1f76c7b1afd11f799e22035d63077fb4d
+          - bash: system
+    env:
+      V: ${{ matrix.bash }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Set build directory (outside the checkout)
+        run: echo "SRC=$RUNNER_TEMP/bash-$V" >> "$GITHUB_ENV"
+      - name: Install zsh and expect
+        run: sudo apt-get update -q && sudo apt-get install -yq zsh expect
+      - name: Restore built bash
+        if: matrix.bash != 'system'
+        id: cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ${{ env.SRC }}/bash
+          key: bash-${{ matrix.bash }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Build bash ${{ matrix.bash }}
+        if: matrix.bash != 'system' && steps.cache.outputs.cache-hit != 'true'
+        env:
+          SHA256: ${{ matrix.sha256 }}
+          # Old bash sources predate gcc's C23 default and the checks newer
+          # gcc versions turn into errors.
+          CFLAGS: -O2 -std=gnu17 -Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-conversion -Wno-incompatible-pointer-types
+        run: |
+          mkdir -p "$SRC" && cd "$RUNNER_TEMP"
+          curl -fsSLO "https://ftp.gnu.org/gnu/bash/bash-$V.tar.gz"
+          echo "$SHA256  bash-$V.tar.gz" | sha256sum -c -
+          tar xzf "bash-$V.tar.gz" -C "$SRC" --strip-components=1
+          cd "$SRC" && ./configure && make -j"$(nproc)"
+      - name: bash src/test.bash
+        run: |
+          if [[ $V == system ]]; then b=/bin/bash; else b=$SRC/bash; fi
+          "$b" --version | head -1
+          out=$RUNNER_TEMP/out
+          rc=0; "$b" src/test.bash 2>&1 | tee "$out" || rc=$?
+          if grep -E '^skip (pty|prompt)' "$out"; then echo '::error::tests skipped'; rc=1; fi
+          if (( rc )); then
+            echo "--- failures (exit $rc)"; grep -v '^ok' "$out" || :
+            sed -n "s/^FAIL /::error title=bash $V::FAIL /p" "$out"
+          fi
+          exit "$rc"
