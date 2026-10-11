@@ -195,6 +195,9 @@ assert_eq "spin: default on"  1 "$HOW_TO_SPINNER"
 assert_eq "spin: preset kept" 0 "$(HOW_TO_SPINNER=0; source "$here/how-to.bash"; echo "$HOW_TO_SPINNER")"
 assert_eq "spin: off when not a tty" 1 "$(_how_to_spin_on 2>/dev/null; echo $?)"
 assert_eq "spin: unset vars under set -u" 'ls|' "$( set -u; unset HOW_TO_SPINNER TERM; stub_out=ls; run x; echo "$pushed|$err")"
+assert_eq "spin: no \$! yet under set -u" $'ls\nrc=0' "$("$BASH" -c "source '$here/how-to.bash'
+  _how_to_provider_stub() { cat >/dev/null; echo ls; }; HOW_TO_PROVIDER=stub; set -u
+  _how_to_main x; echo rc=\$?" 2>&1)"
 stub_out=''; stub_rc=1; ( set -e; _how_to_main x 2>"$tmp/err" >/dev/null ); stub_rc=0
 assert_eq "spin: provider failure under set -e" 'how-to: provider failed' "$(<"$tmp/err")"
 stub_out=ls; ( set -e; _how_to_spin() { return 3; }; run x; echo "$pushed" > "$tmp/sete" )
