@@ -46,6 +46,7 @@ assert_eq "shell" "shell: zsh $ZSH_VERSION" "$(_how_to_context_shell)"
 _how_to_push() { pushed=$1 }
 _how_to_provider_stub() {
   print -r -- "$1" > $tmp/sys; cat > $tmp/in
+  [[ -e /dev/fd/3 ]] && print open >$tmp/fd3 || print closed >$tmp/fd3
   print -r -- "$stub_out"; return ${stub_rc:-0}
 }
 HOW_TO_PROVIDER=stub HOW_TO_CONTEXT=()
@@ -111,5 +112,92 @@ assert_eq "git: branch with no commits" 'git_branch: trunk' "$(cd $tmp/repo && _
 git -C $tmp/repo -c user.name=t -c user.email=t@t commit -q --allow-empty -m x
 git -C $tmp/repo checkout -q --detach
 assert_eq "git: no branch when detached" "git_root: ${tmp:A}/repo" "$(cd $tmp/repo && _how_to_context_git)"
+
+# --- spinner
+assert_eq "spin: frame 0"     $'\r| thinking 0s\e[K'  "$(_how_to_spin_frame 0 0)"
+assert_eq "spin: frame 1"     $'\r/ thinking 0s\e[K'  "$(_how_to_spin_frame 1 0)"
+assert_eq "spin: frame 3"     $'\r\\ thinking 12s\e[K' "$(_how_to_spin_frame 3 12)"
+assert_eq "spin: frame wraps" $'\r| thinking 1s\e[K'  "$(_how_to_spin_frame 4 1)"
+assert_eq "spin: float secs"  $'\r- thinking 2s\e[K'  "$(_how_to_spin_frame 2 2.71)"
+assert_eq "ksharrays: spin frame" $'\r/ thinking 0s\e[K' "$(setopt ksharrays; _how_to_spin_frame 1 0)"
+assert_eq "spin: default on"  1 "$HOW_TO_SPINNER"
+assert_eq "spin: preset kept" 0 "$(HOW_TO_SPINNER=0; source $here/how-to.zsh; print $HOW_TO_SPINNER)"
+assert_eq "spin: off when not a tty" 1 "$(_how_to_spin_on 2>/dev/null; print $?)"
+stub_out=ls; run x; assert_eq "spin: provider without fd 3" closed "$(<$tmp/fd3)"
+
+# --- pty: interactive zsh with expect playing the terminal
+if (( $+commands[expect] )); then
+  cat > $tmp/zpty.exp <<'EOF'
+lassign $argv zd mode marker
+set timeout 5
+log_user 0
+set all ""
+proc done {s} { puts $s; exit }
+proc want {pat} {
+  global all
+  expect -ex $pat { append all $expect_out(buffer) } timeout { done PTY-FAIL } eof { done PTY-FAIL }
+}
+proc landed {} {
+  # The pushed command is on the next prompt; running it shows the marker.
+  global marker
+  want "P> "
+  send "\r"
+  want $marker
+}
+spawn -noecho env TERM=xterm ZDOTDIR=$zd zsh -i
+want "P> "
+set all ""
+if {$mode eq "spin"} {
+  send "how-to x\r"
+  want "| thinking 0s"
+  want "thinking 1s"
+  want "\033\[K\r\033\[K"
+  if {[string first "thinking 1s\033\[K\r\033\[K" $all] < 0} { done PTY-NOERASE }
+  landed
+} elseif {$mode eq "off" || $mode eq "dumb" || $mode eq "fast"} {
+  if {$mode eq "dumb"} {
+    send "TERM=dumb\r"
+    want "P> "
+  }
+  if {$mode eq "off"} { send "HOW_TO_SPINNER=0 how-to x\r" } else { send "how-to x\r" }
+  landed
+  if {[string first "thinking" $all] >= 0} { done PTY-DREW }
+} elseif {$mode eq "ctrlc"} {
+  send "how-to x\r"
+  want "thinking 0s"
+  send "\003"
+  want "P> "
+  set timeout 1
+  expect -ex "thinking" { done PTY-REDRAWN } timeout {}
+  set timeout 5
+  send "echo FOLLOW-\$((1+1))\r"
+  want "FOLLOW-2"
+} elseif {$mode eq "fail"} {
+  send "how-to x\r"
+  want "nope"
+  if {[string first "\r\033\[Knope" $all] < 0} { done PTY-NOERASE }
+}
+done PTY-OK
+EOF
+  mkdir $tmp/zd
+  cat > $tmp/zd/.zshrc <<EOF
+PS1='P> '; PROMPT_EOL_MARK=''; HISTFILE=
+source '$here/how-to.zsh'
+HOW_TO_CONTEXT=() HOW_TO_PROVIDER=stub
+_how_to_provider_stub() { cat >/dev/null; command sleep \$(<'$tmp/pty_sleep'); cat '$tmp/pty_cmd' }
+EOF
+  zpty_run() {  # zpty_run <mode> <sleep> <marker> <stub output>
+    print -r -- $2 > $tmp/pty_sleep; print -r -- $4 > $tmp/pty_cmd
+    expect $tmp/zpty.exp $tmp/zd $1 $3
+  }
+  assert_eq "pty: spinner draws and clears"     PTY-OK "$(zpty_run spin 1.3 ZS-42 'echo ZS-$((6*7))')"
+  assert_eq "pty: spinner off"                  PTY-OK "$(zpty_run off 0.4 ZS-42 'echo ZS-$((6*7))')"
+  assert_eq "pty: spinner off for dumb TERM"    PTY-OK "$(zpty_run dumb 0.4 ZS-42 'echo ZS-$((6*7))')"
+  assert_eq "pty: spinner ctrl-c"               PTY-OK "$(zpty_run ctrlc 3 x 'echo x')"
+  assert_eq "pty: spinner erased before error"  PTY-OK "$(zpty_run fail 0.4 x 'HOWTO_FAIL: nope')"
+  assert_eq "pty: no spinner for fast provider" PTY-OK "$(zpty_run fast 0 ZS-42 'echo ZS-$((6*7))')"
+else
+  print 'skip pty (no expect)'
+fi
 
 exit $(( failures > 0 ))

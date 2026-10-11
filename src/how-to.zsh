@@ -30,6 +30,8 @@ _how_to_clean() {
 # appending its name.
 (( ${+HOW_TO_CONTEXT} )) || typeset -ga HOW_TO_CONTEXT=(os shell cwd git tools)
 (( ${+HOW_TO_TOOLS} ))   || typeset -ga HOW_TO_TOOLS=(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)
+# 0 turns the "thinking" indicator off.
+(( ${+HOW_TO_SPINNER} )) || typeset -g HOW_TO_SPINNER=1
 
 _how_to_context_os()    { emulate -L zsh; print -r -- "os: $(command uname -sr)" }
 _how_to_context_shell() { emulate -L zsh; print -r -- "shell: zsh $ZSH_VERSION" }
@@ -98,6 +100,36 @@ _how_to_provider_claude() {
 # --- entry point -------------------------------------------------------------
 _how_to_push() { print -rz -- "$1" }
 
+# --- thinking indicator -----------------------------------------------------
+# One frame: \r<c> thinking <n>s\e[K, <c> from | / - \ by tick, <n> truncated.
+_how_to_spin_frame() {
+  emulate -L zsh
+  integer s=$2
+  local chars='|/-\'
+  printf '\r%s thinking %ds\e[K' ${chars[$1 % 4 + 1]} $s
+}
+
+_how_to_spin_on() {
+  emulate -L zsh
+  [[ ${HOW_TO_SPINNER-1} != 0 && ${TERM-} != dumb && -t 2 ]]
+}
+
+# stdin is a pipe nobody writes to: draw on each 0.1 s timeout, and leave
+# without writing at EOF. SIGINT keeps its default action.
+_how_to_spin() {
+  emulate -L zsh
+  _how_to_spin_on || return 0
+  zmodload zsh/system || return 0
+  local buf start=$SECONDS
+  integer tick=0
+  while :; do
+    sysread -t 0.1 buf
+    (( $? == 4 )) || return 0
+    _how_to_spin_frame $tick $(( SECONDS - start )) >&2
+    (( tick++ ))
+  done
+}
+
 function how-to {
   emulate -L zsh
   if (( ! $# )); then
@@ -111,9 +143,11 @@ function how-to {
     return 1
   fi
 
-  local msg raw cmd
+  local msg raw cmd rc
   msg="$(_how_to_context)"$'\n'"Request: $*"
-  if ! raw=$(print -r -- "$msg" | $fn "$HOW_TO_SYSTEM_PROMPT"); then
+  { raw=$(print -r -- "$msg" | $fn "$HOW_TO_SYSTEM_PROMPT" 3>&-); rc=$? } 3> >(_how_to_spin)
+  _how_to_spin_on && print -rnu2 -- $'\r\e[K'
+  if (( rc )); then
     print -u2 'how-to: provider failed'
     return 1
   fi
