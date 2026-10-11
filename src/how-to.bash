@@ -215,8 +215,8 @@ _how_to_main() {
   # Wait for the spinner only if the substitution set $! (else $! may be a
   # job of the user's, which could run for a long time).
   bg=${!-}
-  { raw=$(printf '%s\n' "$msg" | "$fn" "$HOW_TO_SYSTEM_PROMPT" 3>&-); rc=$?; } 3> >(_how_to_spin)
-  [[ ${!-} != "$bg" ]] && wait "$!" 2>/dev/null
+  { raw=$(printf '%s\n' "$msg" | "$fn" "$HOW_TO_SYSTEM_PROMPT" 3>&-) && rc=0 || rc=$?; } 3> >(_how_to_spin)
+  [[ ${!-} != "$bg" ]] && wait "$!" 2>/dev/null || :
   _how_to_spin_on && printf '\r\e[K' >&2
   if (( rc )); then
     printf '%s\n' 'how-to: provider failed' >&2

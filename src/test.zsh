@@ -148,6 +148,11 @@ spawn -noecho env TERM=xterm ZDOTDIR=$zd zsh -i
 want "P> "
 set all ""
 if {$mode eq "spin"} {
+  # Shift the shell's age to ~0.8 s past a whole second: elapsed time must
+  # count from the call, not from the shell's start.
+  send "command sleep 0.8\r"
+  want "P> "
+  set all ""
   send "how-to x\r"
   want "| thinking 0s"
   want "thinking 1s"

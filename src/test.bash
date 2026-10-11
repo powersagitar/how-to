@@ -193,6 +193,10 @@ assert_eq "spin: default on"  1 "$HOW_TO_SPINNER"
 assert_eq "spin: preset kept" 0 "$(HOW_TO_SPINNER=0; source "$here/how-to.bash"; echo "$HOW_TO_SPINNER")"
 assert_eq "spin: off when not a tty" 1 "$(_how_to_spin_on 2>/dev/null; echo $?)"
 assert_eq "spin: unset vars under set -u" 'ls|' "$( set -u; unset HOW_TO_SPINNER TERM; stub_out=ls; run x; echo "$pushed|$err")"
+stub_out=''; stub_rc=1; ( set -e; _how_to_main x 2>"$tmp/err" >/dev/null ); stub_rc=0
+assert_eq "spin: provider failure under set -e" 'how-to: provider failed' "$(<"$tmp/err")"
+stub_out=ls; ( set -e; _how_to_spin() { return 3; }; run x; echo "$pushed" > "$tmp/sete" )
+assert_eq "spin: spinner status ignored under set -e" ls "$(<"$tmp/sete")"
 stub_out=ls; run x; assert_eq "spin: provider without fd 3" closed "$(<"$tmp/fd3")"
 command sleep 30 & bg=$!
 stub_out=ls; SECONDS=0; run x; t=$SECONDS; kill "$bg"; wait "$bg" 2>/dev/null

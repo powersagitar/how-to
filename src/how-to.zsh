@@ -120,12 +120,14 @@ _how_to_spin() {
   emulate -L zsh
   _how_to_spin_on || return 0
   zmodload zsh/system || return 0
-  local buf start=$SECONDS
-  integer tick=0
+  # Count from 0 here: the shell's SECONDS ticks a whole second after it
+  # started, not after this call did. integer undoes a user's typeset -F.
+  integer SECONDS=0 tick=0
+  local buf
   while :; do
     sysread -t 0.1 buf
     (( $? == 4 )) || return 0
-    _how_to_spin_frame $tick $(( SECONDS - start )) >&2
+    _how_to_spin_frame $tick $SECONDS >&2
     (( tick++ ))
   done
 }
