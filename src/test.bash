@@ -89,7 +89,9 @@ git -C "$tmp/repo" checkout -q --detach
 assert_eq "git: no branch when detached" "git_root: $(cd "$tmp" && pwd -P)/repo" "$(cd "$tmp/repo" && _how_to_context_git)"
 
 # --- how-to end to end (stub provider, captured push)
-shopt -s expand_aliases
+# bash 4.4 turns expand_aliases off in a script whenever a function with
+# `local -` returns (fixed in 5.0), so turn it on again before each eval.
+alias_eval() { shopt -s expand_aliases; eval "$1"; }
 _how_to_push() { pushed=$1; }
 _how_to_provider_stub() {
   printf '%s\n' "$1" > "$tmp/sys"; cat > "$tmp/in"
@@ -112,25 +114,25 @@ assert_eq "e2e: ctx block first" '<context>' "$(head -1 "$tmp/in")"
 stub_out='x'; run 'replace "foo" with $bar'
 assert_eq "literal request" 'Request: replace "foo" with $bar' "$(last_in)"
 touch "$tmp/x.nomatch"; cd "$tmp"
-stub_out=x; eval 'how-to find all *.nomatch files' 2>/dev/null
+stub_out=x; alias_eval 'how-to find all *.nomatch files' 2>/dev/null
 assert_eq "noglob request" 'Request: find all *.nomatch files' "$(last_in)"
 assert_eq "glob restored" '' "$(globf)"
 cd "$here"
-set -f; eval 'how-to x' >/dev/null 2>&1; f=$(globf); set +f
+set -f; alias_eval 'how-to x' >/dev/null 2>&1; f=$(globf); set +f
 assert_eq "glob kept off" f "$f"
-eval 'how-to' 2>/dev/null; a=$(globf)
-HOW_TO_PROVIDER=nope; eval 'how-to x' 2>/dev/null; b=$(globf); HOW_TO_PROVIDER=stub
-stub_out='HOWTO_FAIL: x'; eval 'how-to x' 2>/dev/null; c=$(globf)
+alias_eval 'how-to' 2>/dev/null; a=$(globf)
+HOW_TO_PROVIDER=nope; alias_eval 'how-to x' 2>/dev/null; b=$(globf); HOW_TO_PROVIDER=stub
+stub_out='HOWTO_FAIL: x'; alias_eval 'how-to x' 2>/dev/null; c=$(globf)
 assert_eq "glob restored on error" '||' "$a|$b|$c"
 set -f; run x; f=$(globf); set +f
 assert_eq "direct call keeps glob off" f "$f"
 stub_out=x; echo untouched > "$tmp/in"; pushed=
-eval 'false && how-to x' 2>/dev/null; rc=$?
+alias_eval 'false && how-to x' 2>/dev/null; rc=$?
 assert_eq "alias: && short-circuits" '1|untouched|' "$rc|$(<"$tmp/in")|$pushed"
-eval 'true || how-to x' 2>/dev/null; rc=$?
+alias_eval 'true || how-to x' 2>/dev/null; rc=$?
 assert_eq "alias: || short-circuits" "0|untouched||$(globf)" "$rc|$(<"$tmp/in")|$pushed|$([[ -v _how_to_f ]] && echo set)"
 _how_to_provider_stub2() { cat >/dev/null; echo from-stub2; }
-eval 'HOW_TO_PROVIDER=stub2 how-to x' 2>/dev/null
+alias_eval 'HOW_TO_PROVIDER=stub2 how-to x' 2>/dev/null
 assert_eq "alias: HOW_TO_ prefix applies to the call" from-stub2 "$pushed"
 assert_eq "alias: HOW_TO_ prefix not kept" stub "$HOW_TO_PROVIDER"
 _how_to_pending=stale; run
@@ -205,7 +207,10 @@ assert_eq "spin: does not wait on user's background job" 'ls|0' "$pushed|$(( t >
 # --- pty: interactive bash with expect playing the terminal
 if type -P expect >/dev/null; then
   cat > "$tmp/pty.exp" <<'EOF'
-lassign $argv bash rc mode marker
+lassign $argv bash rc mode marker precise
+# Without EPOCHREALTIME (bash 4.4) the spinner counts wall-clock seconds, so
+# which frame shows 0s or 1s, and which comes last, depends on timing.
+set zero [expr {$precise ? "thinking 0s" : "thinking "}]
 set timeout 5
 log_user 0
 set all ""
@@ -254,16 +259,17 @@ if {$mode in {spin off dumb ctrlc-spin fail fast strict}} {
   set all ""
   if {$mode eq "off"} { send "HOW_TO_SPINNER=0 how-to x\r" } else { send "how-to x\r" }
   if {$mode eq "spin" || $mode eq "strict"} {
-    want "| thinking 0s"
+    want "| $zero"
     want "thinking 1s"
   }
   if {$mode eq "spin"} {
     want "\033\[K\r\033\[K"
-    if {[string first "thinking 1s\033\[K\r\033\[K" $all] < 0} { done PTY-NOERASE }
+    if {$precise && [string first "thinking 1s\033\[K\r\033\[K" $all] < 0} { done PTY-NOERASE }
+    if {!$precise && ![regexp {thinking \d+s\x1b\[K\r\x1b\[K$} $all]} { done PTY-NOERASE }
     if {[string first "\033\[5n" $all] >= 0} { done PTY-QUERY-FIRST }
   }
   if {$mode eq "ctrlc-spin"} {
-    want "thinking 0s"
+    want $zero
     send "\003"
     want "P> "
     set timeout 1
@@ -353,7 +359,7 @@ source '$here/how-to.bash'
 HOW_TO_CONTEXT=() HOW_TO_PROVIDER=stub
 _how_to_provider_stub() { cat >/dev/null; [[ -s '$tmp/pty_sleep' ]] && command sleep \$(<'$tmp/pty_sleep'); cat '$tmp/pty_cmd'; }
 EOF
-    expect "$tmp/pty.exp" "$BASH" "$tmp/pty_rc" "$1" "$3"
+    expect "$tmp/pty.exp" "$BASH" "$tmp/pty_rc" "$1" "$3" "$([[ -n ${EPOCHREALTIME-} ]] && echo 1 || echo 0)"
   }
   assert_eq "pty: inserted"   PTY-OK "$(pty 0   '' INSERTED-42 'echo INSERTED-$((6*7))')"
   assert_eq "pty: slow reply" PTY-OK "$(pty 0.3 '' INSERTED-42 'echo INSERTED-$((6*7))')"
