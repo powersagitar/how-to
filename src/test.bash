@@ -218,9 +218,16 @@ set timeout 5
 log_user 0
 set all ""
 proc done {s} { puts $s; exit }
+# On failure, also show the end of what the terminal printed.
+proc fail {} {
+  global all
+  expect -timeout 0 -re {.+} { append all $expect_out(buffer) } timeout {} eof {}
+  set t [string map {"\033" "\\e" "\r" "\\r" "\n" "\\n"} [string range $all end-299 end]]
+  done "PTY-FAIL ...$t"
+}
 proc want {pat} {
   global all
-  expect -ex $pat { append all $expect_out(buffer) } timeout { done PTY-FAIL } eof { done PTY-FAIL }
+  expect -ex $pat { append all $expect_out(buffer) } timeout fail eof fail
 }
 spawn -noecho env TERM=xterm $bash --noprofile --rcfile $rc -i
 want "P> "
