@@ -209,16 +209,19 @@ _how_to_main() {
 # can see it. No reply within 1 s, or no terminal: print the command instead.
 # Input already waiting before the query is typeahead, not the reply, and
 # reading it would take it from readline: skip the query and print.
-# A terminal that stays silent for the whole wait doesn't answer; remember
-# that for the session (_how_to_no_dsr) and print without asking from then
-# on, so a key pressed during a later wait can't be mistaken for the reply.
+# A terminal that stays silent for the whole wait probably doesn't answer;
+# remember when (_how_to_no_dsr) and print without asking for the next 10
+# minutes, so a key pressed during a later wait can't be mistaken for the
+# reply. A slow terminal's reply still reaches _how_to_insert at the next
+# prompt, which forgets the silence.
 # The wait runs in a subshell whose EXIT trap restores the tty, so Ctrl-C
 # can't leave it in -echo -icanon.
 _how_to_pending=
 _how_to_push() {
   local -
   local saved rc=0
-  if [[ $- == *i* && -z ${_how_to_no_dsr-} ]] &&
+  if [[ $- == *i* ]] &&
+     { [[ -z ${_how_to_no_dsr-} ]] || (( SECONDS - _how_to_no_dsr >= 600 )); } &&
      saved=$(command stty -g </dev/tty 2>/dev/null); then
     _how_to_pending=$1
     (
@@ -234,15 +237,18 @@ _how_to_push() {
       exit 2
     ) || rc=$?
     (( rc == 0 )) && return 0
-    (( rc == 2 )) && _how_to_no_dsr=1
+    (( rc == 2 )) && _how_to_no_dsr=$SECONDS
     _how_to_pending=
     (( rc == 130 )) && return 130
   fi
   printf '%s\n' "$1"
 }
 
+# Called for every \e[0n, including a reply that came too late for its call:
+# either way the terminal answers.
 _how_to_insert() {
   local -
+  unset _how_to_no_dsr
   [[ -n $_how_to_pending ]] || return 0
   READLINE_LINE=$_how_to_pending
   READLINE_POINT=${#READLINE_LINE}

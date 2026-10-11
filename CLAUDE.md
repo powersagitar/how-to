@@ -88,10 +88,11 @@ Config variables are only set when unset (zsh `(( ${+VAR} )) ||`, bash
   (typeahead; prints instead), writes `\e[5n` to `/dev/tty`, polls
   `read -t 0` for up to 1 s, and restores the tty (in a subshell with an EXIT
   trap, so Ctrl-C restores it too); no reply → prints the command, and a
-  silent timeout sets `_how_to_no_dsr`, which skips the query for the rest of
-  the session. The
-  terminal's `\e[0n` reply is bound (`bind -x`, emacs and vi-insert, only in
-  interactive shells) to `_how_to_insert`, which sets `READLINE_LINE`.
+  silent timeout sets `_how_to_no_dsr=$SECONDS`, which skips the query for
+  600 s. The terminal's `\e[0n` reply is bound (`bind -x`, emacs and
+  vi-insert, only in interactive shells) to `_how_to_insert`, which unsets
+  `_how_to_no_dsr` (a late reply proves the terminal answers) and, if
+  `_how_to_pending` is set, sets `READLINE_LINE`.
 - pty tests drive an interactive bash with `expect`. Use the unbraced
   `expect -ex $pat {...} timeout {...}` form (a one-line braced body is
   treated as a single pattern) and `-ex` for escape sequences.

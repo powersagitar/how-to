@@ -167,6 +167,8 @@ assert_eq "insert: point at end" 16 "$READLINE_POINT"
 assert_eq "insert: pending cleared" '' "$_how_to_pending"
 READLINE_LINE=keep; _how_to_insert
 assert_eq "insert: no-op when empty" keep "$READLINE_LINE"
+_how_to_no_dsr=5; _how_to_insert
+assert_eq "insert: late reply forgets silence" unset "${_how_to_no_dsr-unset}"
 assert_eq "source: silent non-interactive" '' "$("$BASH" -c "source '$here/how-to.bash'" 2>&1)"
 for map in emacs vi-insert; do
   assert_eq "bind: $map" yes "$("$BASH" --norc -ic "source '$here/how-to.bash'; bind -m $map -X" 2>/dev/null |
@@ -244,6 +246,26 @@ if {$mode eq "ctrlc"} {
   want "$marker\r\n"
   want "P> "
   if {[string first "\033\[5n" $all] >= 0} { done PTY-REQUERIED }
+} elseif {$mode eq "late" || $mode eq "retry"} {
+  # The first call gets no reply in time, so the command is printed.
+  want "P> "
+  if {$mode eq "late"} {
+    # The reply turns up after all: readline hands it to _how_to_insert.
+    send "\033\[0n\r"
+  } else {
+    # No reply ever, but enough time passes to ask again.
+    send "SECONDS=\$((SECONDS+600))\r"
+  }
+  want "P> "
+  # Either way the next call queries again, and an answer places the command.
+  set all ""
+  send "how-to x\r"
+  want "\033\[5n"
+  send "\033\[0n"
+  want "P> "
+  send "\r"
+  want $marker
+  want "P> "
 } else {
   if {$mode ne "0"} { sleep $mode }
   send "\033\[0n"
@@ -270,6 +292,8 @@ EOF
   assert_eq "pty: slow reply" PTY-OK "$(pty 0.3 INSERTED-42 'echo INSERTED-$((6*7))')"
   assert_eq "pty: multi-line" PTY-OK "$(pty 0   B-2 $'echo A \\\n  && echo B-$((1+1))')"
   assert_eq "pty: no reply"   PTY-OK "$(pty none 'echo NOREPLY-$((1+1))' 'echo NOREPLY-$((1+1))')"
+  assert_eq "pty: late reply re-enables query" PTY-OK "$(pty late LATE-2 'echo LATE-$((1+1))')"
+  assert_eq "pty: query retried after a while" PTY-OK "$(pty retry LATE-2 'echo LATE-$((1+1))')"
   assert_eq "pty: ctrl-c restores tty" PTY-OK "$(pty ctrlc x 'echo NOREPLY')"
   assert_eq "pty: glob back after expansion error" PTY-OK "$(pty nounset GLOB-ON 'echo x')"
   assert_eq "pty: vi mode inserted" PTY-OK "$(pty vi INSERTED-42 'echo INSERTED-$((6*7))')"

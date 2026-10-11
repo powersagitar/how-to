@@ -43,11 +43,15 @@ cancels the call and leaves your terminal as it was. Both emacs and vi
 (`set -o vi`) editing modes work.
 
 If you type while `how-to` is waiting for the model, the command is printed
-instead (your keys stay on the prompt). A terminal that doesn't answer is
-remembered for the session, so later calls print at once without the 1 s
-wait. Known limitation: on such a terminal, a key pressed during the first
-call's 1 s wait is mistaken for the reply, so that command is neither placed
-nor printed. Run it again.
+instead (your keys stay on the prompt). A terminal that doesn't answer within
+1 s is remembered, so calls in the next 10 minutes print at once without the
+wait; after that, `how-to` asks again. A terminal that is only slow (for
+example over a laggy ssh link) recovers sooner: its late answer reaches the
+next prompt and makes the next call ask again. If that answer arrives just as
+the prompt is being drawn, `^[[0n` may show on the screen; it is harmless.
+Known limitation: on a terminal that doesn't answer, a key pressed during the
+1 s wait is mistaken for the reply, so that command is neither placed nor
+printed. Run it again.
 
 Sourcing the bash file in an interactive shell also appends
 `_how_to_restore_glob` to `PROMPT_COMMAND` (once, even if you re-source).
