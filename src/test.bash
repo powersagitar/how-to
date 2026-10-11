@@ -71,6 +71,9 @@ assert_eq "cwd: dotfiles included" 'files: .hidden' "$(cd "$tmp/dots" && _how_to
 assert_eq "cwd: empty dir" "cwd: $tmp/empty" "$(cd "$tmp/empty" && _how_to_context_cwd)"
 assert_eq "cwd: hostile opts" "cwd: $tmp/empty" "$(
   cd "$tmp/empty"; set -euo pipefail; shopt -s failglob nocasematch nullglob; IFS=:; _how_to_context_cwd)"
+assert_eq "cwd: lists files under set -f" 'files: .hidden' "$(cd "$tmp/dots" && set -f && _how_to_context_cwd | sed -n 2p)"
+mkdir "$tmp/sp"; touch "$tmp/sp/a b"
+assert_eq "cwd: name with space" 'files: a b' "$(cd "$tmp/sp" && _how_to_context_cwd | sed -n 2p)"
 assert_eq "git: silent outside repo" '' "$(cd "$tmp" && _how_to_context_git)"
 assert_eq "git: root in repo" "git_root: ${here%/*}" "$(cd "$here" && _how_to_context_git | head -1)"
 assert_eq "tools: only installed" 'tools: bash' "$(HOW_TO_TOOLS=(bash definitely-not-a-tool-xyz); _how_to_context_tools)"
@@ -118,6 +121,19 @@ eval 'how-to' 2>/dev/null; a=$(globf)
 HOW_TO_PROVIDER=nope; eval 'how-to x' 2>/dev/null; b=$(globf); HOW_TO_PROVIDER=stub
 stub_out='HOWTO_FAIL: x'; eval 'how-to x' 2>/dev/null; c=$(globf)
 assert_eq "glob restored on error" '||' "$a|$b|$c"
+set -f; run x; f=$(globf); set +f
+assert_eq "direct call keeps glob off" f "$f"
+stub_out=x; echo untouched > "$tmp/in"; pushed=
+eval 'false && how-to x' 2>/dev/null; rc=$?
+assert_eq "alias: && short-circuits" '1|untouched|' "$rc|$(<"$tmp/in")|$pushed"
+eval 'true || how-to x' 2>/dev/null; rc=$?
+assert_eq "alias: || short-circuits" "0|untouched||$(globf)" "$rc|$(<"$tmp/in")|$pushed|$([[ -v _how_to_f ]] && echo set)"
+_how_to_provider_stub2() { cat >/dev/null; echo from-stub2; }
+eval 'HOW_TO_PROVIDER=stub2 how-to x' 2>/dev/null
+assert_eq "alias: HOW_TO_ prefix applies to the call" from-stub2 "$pushed"
+assert_eq "alias: HOW_TO_ prefix not kept" stub "$HOW_TO_PROVIDER"
+_how_to_pending=stale; run
+assert_eq "main: clears stale pending" '' "$_how_to_pending"
 assert_eq "re-source ok" '' "$(source "$here/how-to.bash" 2>&1)"
 
 run;                          assert_eq "no args rc" 2 "$rc"; assert_eq "no args msg" 'usage: how-to <what you want to do>' "$err"
@@ -177,6 +193,22 @@ proc want {pat} {
 }
 spawn -noecho env TERM=xterm $bash --noprofile --rcfile $rc -i
 want "P> "
+if {$mode eq "vi"} {
+  send "set -o vi\r"
+  want "P> "
+  set mode 0
+}
+if {$mode eq "typeahead"} {
+  # Keys typed while the model works are waiting before the query: no query,
+  # the command is printed, and the keys still reach readline.
+  send "how-to x\r"
+  after 100
+  send "zz"
+  want "$marker\r\n"
+  want "P> zz"
+  if {[string first "\033\[5n" $all] >= 0} { done PTY-QUERIED }
+  done PTY-OK
+}
 if {$mode eq "nounset"} {
   # The request fails to expand after the alias's `set -f`: globbing must
   # still be back on at the next command.
@@ -205,6 +237,13 @@ if {$mode eq "ctrlc"} {
   after 300
   send "zzz\r"
   want "zzz\r\nzzz"
+  # The silence is remembered: the next call prints without a query.
+  want "P> "
+  set all ""
+  send "how-to x\r"
+  want "$marker\r\n"
+  want "P> "
+  if {[string first "\033\[5n" $all] >= 0} { done PTY-REQUERIED }
 } else {
   if {$mode ne "0"} { sleep $mode }
   send "\033\[0n"
@@ -218,11 +257,12 @@ done PTY-OK
 EOF
   pty() {  # pty <mode: 0|seconds|none> <marker> <stub output>
     printf '%s\n' "$3" > "$tmp/pty_cmd"
+    [[ $1 == typeahead ]] && echo 0.5 > "$tmp/pty_sleep" || : > "$tmp/pty_sleep"
     cat > "$tmp/pty_rc" <<EOF
 PS1='P> '; HISTFILE=; unset PROMPT_COMMAND
 source '$here/how-to.bash'
 HOW_TO_CONTEXT=() HOW_TO_PROVIDER=stub
-_how_to_provider_stub() { cat >/dev/null; cat '$tmp/pty_cmd'; }
+_how_to_provider_stub() { cat >/dev/null; [[ -s '$tmp/pty_sleep' ]] && command sleep \$(<'$tmp/pty_sleep'); cat '$tmp/pty_cmd'; }
 EOF
     expect "$tmp/pty.exp" "$BASH" "$tmp/pty_rc" "$1" "$2"
   }
@@ -232,6 +272,8 @@ EOF
   assert_eq "pty: no reply"   PTY-OK "$(pty none 'echo NOREPLY-$((1+1))' 'echo NOREPLY-$((1+1))')"
   assert_eq "pty: ctrl-c restores tty" PTY-OK "$(pty ctrlc x 'echo NOREPLY')"
   assert_eq "pty: glob back after expansion error" PTY-OK "$(pty nounset GLOB-ON 'echo x')"
+  assert_eq "pty: vi mode inserted" PTY-OK "$(pty vi INSERTED-42 'echo INSERTED-$((6*7))')"
+  assert_eq "pty: typeahead prints" PTY-OK "$(pty typeahead 'echo TA-$((1+1))' 'echo TA-$((1+1))')"
 else
   echo 'skip pty (no expect)'
 fi

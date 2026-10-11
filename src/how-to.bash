@@ -54,13 +54,14 @@ declare -p HOW_TO_TOOLS &>/dev/null   || HOW_TO_TOOLS=(rg fd jq yq tokei cloc fz
 _how_to_context_os()    { local -; printf '%s\n' "os: $(command uname -sr)"; }
 _how_to_context_shell() { local -; printf '%s\n' "shell: bash $BASH_VERSION"; }
 
+# find, not a glob: bash can't glob without sorting, and a big directory
+# would be read and sorted in full just to keep 30 names.
 _how_to_context_cwd() {
   local -
-  local IFS=$' \t\n' files
-  local opts; opts=$(shopt -p nocasematch nullglob dotglob failglob extglob) || :
-  shopt -s nullglob dotglob; shopt -u failglob
-  files=(*)
-  eval "$opts"
+  local IFS=$' \t\n' f files=()
+  while (( ${#files[@]} < 30 )) && IFS= read -rd '' f; do
+    files+=("${f#./}")
+  done < <(command find . -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
   printf '%s\n' "cwd: $PWD"
   (( ${#files[@]} )) && printf '%s\n' "files: ${files[*]:0:30}"
   return 0
@@ -127,14 +128,41 @@ _how_to_provider_claude() {
 }
 
 # --- entry point -------------------------------------------------------------
-# Called through the how-to alias below, which saves $- in _how_to_f and turns
-# globbing off before the request words are expanded.
+# The how-to alias below runs `_how_to_pre && _how_to_run <request>`.
+# _how_to_pre runs first, so its `set -f` is in effect when the request words
+# are expanded. Being one && list, `cond && how-to ...` short-circuits as a
+# whole, and an assignment in front (`HOW_TO_PROVIDER=x how-to ...`) reaches
+# only _how_to_pre, which snapshots HOW_TO_* for _how_to_main to apply.
+# Neither has `local -`: changing the caller's options is the point.
+_how_to_pre() {
+  _how_to_f=$-
+  set -f
+  _how_to_env=
+  local names=("${!HOW_TO_@}")
+  (( ${#names[@]} )) && _how_to_env=$(declare -p "${names[@]}")
+  return 0
+}
+
+# `cond || how-to ...` skips _how_to_pre when cond succeeds; then do nothing.
+_how_to_run() {
+  [[ -v _how_to_f ]] || return 0
+  _how_to_main "$@"
+}
+
 _how_to_main() {
-  # Restore globbing before `local -`, so every return path keeps it restored.
-  [[ ${_how_to_f-} == *f* ]] || set +f
-  unset _how_to_f
+  # Through the alias: restore globbing before `local -`, so every return path
+  # keeps it restored. Called directly, leave it as it is.
+  local env=
+  if [[ -v _how_to_f ]]; then
+    [[ $_how_to_f == *f* ]] || set +f
+    env=${_how_to_env-}
+    unset _how_to_f _how_to_env
+  fi
   local -
   local IFS=$' \t\n'
+  _how_to_pending=
+  # declare -p output; inside a function it declares locals for this call.
+  eval "$env" 2>/dev/null || :
   if (( ! $# )); then
     printf '%s\n' 'usage: how-to <what you want to do>' >&2
     return 2
@@ -179,26 +207,34 @@ _how_to_main() {
 # next prompt, where it is bound to _how_to_insert. Echo is off while the reply
 # arrives (else it shows as ^[[0n) and canonical mode is off so `read -t 0`
 # can see it. No reply within 1 s, or no terminal: print the command instead.
+# Input already waiting before the query is typeahead, not the reply, and
+# reading it would take it from readline: skip the query and print.
+# A terminal that stays silent for the whole wait doesn't answer; remember
+# that for the session (_how_to_no_dsr) and print without asking from then
+# on, so a key pressed during a later wait can't be mistaken for the reply.
 # The wait runs in a subshell whose EXIT trap restores the tty, so Ctrl-C
 # can't leave it in -echo -icanon.
 _how_to_pending=
 _how_to_push() {
   local -
   local saved rc=0
-  if [[ $- == *i* ]] && saved=$(command stty -g </dev/tty 2>/dev/null); then
+  if [[ $- == *i* && -z ${_how_to_no_dsr-} ]] &&
+     saved=$(command stty -g </dev/tty 2>/dev/null); then
     _how_to_pending=$1
     (
       trap 'command stty "$saved" </dev/tty' EXIT
       trap 'exit 130' INT
       command stty -echo -icanon </dev/tty
+      read -t 0 </dev/tty && exit 1
       printf '\e[5n' >/dev/tty
       for (( i = 0; i < 100; i++ )); do
         read -t 0 </dev/tty && exit 0
         command sleep 0.01
       done
-      exit 1
+      exit 2
     ) || rc=$?
     (( rc == 0 )) && return 0
+    (( rc == 2 )) && _how_to_no_dsr=1
     _how_to_pending=
     (( rc == 130 )) && return 130
   fi
@@ -221,7 +257,7 @@ _how_to_restore_glob() {
   local rc=$?
   if [[ -v _how_to_f ]]; then
     [[ $_how_to_f == *f* ]] || set +f
-    unset _how_to_f
+    unset _how_to_f _how_to_env
   fi
   return "$rc"
 }
@@ -239,4 +275,4 @@ fi
 
 # Keep globs like *.log in the request from being expanded by the shell.
 # Defined last, so no `how-to` above is alias-expanded.
-alias how-to='_how_to_f=$-; set -f; _how_to_main'
+alias how-to='_how_to_pre && _how_to_run'

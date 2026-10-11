@@ -42,9 +42,12 @@ command is printed instead of placed on the prompt. Ctrl-C during that wait
 cancels the call and leaves your terminal as it was. Both emacs and vi
 (`set -o vi`) editing modes work.
 
-Known limitation: on a terminal that doesn't answer, keys you type while
-`how-to` is waiting for the model are mistaken for the reply, so the command
-is neither placed nor printed. Run it again without typing ahead.
+If you type while `how-to` is waiting for the model, the command is printed
+instead (your keys stay on the prompt). A terminal that doesn't answer is
+remembered for the session, so later calls print at once without the 1 s
+wait. Known limitation: on such a terminal, a key pressed during the first
+call's 1 s wait is mistaken for the reply, so that command is neither placed
+nor printed. Run it again.
 
 Sourcing the bash file in an interactive shell also appends
 `_how_to_restore_glob` to `PROMPT_COMMAND` (once, even if you re-source).
@@ -77,16 +80,11 @@ $ how-to 'files > 100MB in $HOME'
 `how-to` itself never evaluates the request; it is sent to the model as text.
 
 In bash, `how-to` is an alias that turns globbing off before your words are
-expanded (`_how_to_f=$-; set -f; _how_to_main`), so globs pass through the
-same way. The quoting advice above applies too. Because the alias is several
-commands joined by `;`:
-
-- `HOW_TO_PROVIDER=ollama how-to ...` sets the variable for the rest of the
-  session, not just this call. For a one-off, call the function behind the
-  alias directly: `HOW_TO_PROVIDER=ollama _how_to_main ...`. That skips the
-  glob protection, so quote any `*` in the request, and it turns globbing on
-  if you had it off with `set -f`.
-- Don't chain it: `cond && how-to ...` runs `how-to` even when `cond` fails.
+expanded (`_how_to_pre && _how_to_run`), so globs pass through the same way.
+The quoting advice above applies too. `cond && how-to ...` and
+`cond || how-to ...` work as usual. An assignment in front applies to that
+call only if its name starts with `HOW_TO_` (`HOW_TO_PROVIDER=ollama how-to
+...`); any other assignment in front is ignored.
 
 ## Configuration
 

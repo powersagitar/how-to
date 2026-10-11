@@ -74,15 +74,22 @@ Config variables are only set when unset (zsh `(( ${+VAR} )) ||`, bash
 - External programs go through `command`; tool detection uses `type -P`.
   Config is set only if unset with `declare -p VAR &>/dev/null ||` (not
   `[[ -v ]]`, which is false for an empty array).
-- `alias how-to='_how_to_f=$-; set -f; _how_to_main'`, defined last.
-  `_how_to_main` restores globbing *before* `local -`, so every return path
-  leaves it restored. If a request word fails to expand (e.g. `$1` under `set -u`),
-  `_how_to_main` never runs; `_how_to_restore_glob`, appended once to
-  `PROMPT_COMMAND` in interactive shells, undoes the `set -f` at the next prompt.
+- `alias how-to='_how_to_pre && _how_to_run'`, defined last. `_how_to_pre`
+  saves `$-` in `_how_to_f`, sets `-f`, and snapshots `HOW_TO_*` (`declare -p`)
+  so a prefix assignment, which only reaches `_how_to_pre`, applies to the
+  call. `_how_to_run` does nothing unless `_how_to_f` is set (`cond || how-to`).
+  Neither has `local -`. `_how_to_main` restores globbing *before* `local -`,
+  and only when `_how_to_f` is set (a direct call leaves `-f` alone). If a
+  request word fails to expand (e.g. `$1` under `set -u`), `_how_to_run` never
+  runs; `_how_to_restore_glob`, appended once to `PROMPT_COMMAND` in
+  interactive shells, undoes the `set -f` at the next prompt.
 - `_how_to_push` stores the command in `_how_to_pending`, sets
-  `stty -echo -icanon`, writes `\e[5n` to `/dev/tty`, polls `read -t 0` for
-  up to 1 s, and restores the tty (in a subshell with an EXIT trap, so Ctrl-C
-  restores it too); no reply → prints the command. The
+  `stty -echo -icanon`, skips the query if input is already waiting
+  (typeahead; prints instead), writes `\e[5n` to `/dev/tty`, polls
+  `read -t 0` for up to 1 s, and restores the tty (in a subshell with an EXIT
+  trap, so Ctrl-C restores it too); no reply → prints the command, and a
+  silent timeout sets `_how_to_no_dsr`, which skips the query for the rest of
+  the session. The
   terminal's `\e[0n` reply is bound (`bind -x`, emacs and vi-insert, only in
   interactive shells) to `_how_to_insert`, which sets `READLINE_LINE`.
 - pty tests drive an interactive bash with `expect`. Use the unbraced
