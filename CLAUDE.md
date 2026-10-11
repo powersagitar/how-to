@@ -48,6 +48,13 @@ the reason is shown on stderr. `_how_to_clean` keeps only the inside of the
 first code fence (the fence may be indented, and its content is dedented to
 match), then trims the result.
 
+The provider call is wrapped as `{ raw=$(… 3>&-); rc=$? } 3> >(_how_to_spin)`.
+`_how_to_spin` reads that never-written pipe, draws a frame on each 0.1 s
+timeout (off when `HOW_TO_SPINNER=0`, `TERM=dumb` or stderr isn't a tty), and
+exits at EOF without writing; the parent then erases with `\r\e[K`. bash
+`wait`s only if `$!` changed, and times with `EPOCHREALTIME` (bash's `SECONDS`
+ticks on wall-clock seconds).
+
 Config variables are only set when unset (zsh `(( ${+VAR} )) ||`, bash
 `declare -p VAR &>/dev/null ||`), so user values survive re-sourcing.
 

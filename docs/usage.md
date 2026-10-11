@@ -90,6 +90,15 @@ The quoting advice above applies too. `cond && how-to ...` and
 call only if its name starts with `HOW_TO_` (`HOW_TO_PROVIDER=ollama how-to
 ...`); any other assignment in front is ignored.
 
+## Progress indicator
+
+While the model works, stderr shows a spinner and the seconds waited so far,
+like `/ thinking 3s`. The line is erased before the command (or an error)
+appears. It only shows when stderr is a terminal and `TERM` isn't `dumb`, so
+pipes and scripts never see it. If you press Ctrl-C, the last frame stays on
+its line next to `^C`. Set `HOW_TO_SPINNER=0` in your rc file to turn it off,
+or put it in front of a single call (`HOW_TO_SPINNER=0 how-to ...`).
+
 ## Configuration
 
 Set these in `~/.zshrc` or `~/.bashrc` (before or after sourcing).
@@ -101,6 +110,7 @@ Set these in `~/.zshrc` or `~/.bashrc` (before or after sourcing).
 | `HOW_TO_CONTEXT` | `(os shell cwd git tools)` | context providers, in order |
 | `HOW_TO_TOOLS` | `(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)` | tools reported as installed, if found |
 | `HOW_TO_SYSTEM_PROMPT` | see `src/how-to.zsh` | rules sent to the model |
+| `HOW_TO_SPINNER` | `1` | `0` turns the progress indicator off |
 
 `HOW_TO_CONTEXT` and `HOW_TO_TOOLS` can be arrays or space-separated strings.
 In bash, set a string only before sourcing; after sourcing they are arrays,
