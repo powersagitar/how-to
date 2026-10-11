@@ -151,7 +151,8 @@ proc landed {} {
   send "\r"
   want $marker
 }
-spawn -noecho env TERM=xterm ZDOTDIR=$zd zsh -i
+# -d: skip global rc files (e.g. Debian's compinit, which can stop to ask).
+spawn -noecho env TERM=xterm ZDOTDIR=$zd zsh -d -i
 want "P> "
 set all ""
 if {$mode eq "spin"} {
