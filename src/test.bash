@@ -93,6 +93,7 @@ shopt -s expand_aliases
 _how_to_push() { pushed=$1; }
 _how_to_provider_stub() {
   printf '%s\n' "$1" > "$tmp/sys"; cat > "$tmp/in"
+  [[ -e /dev/fd/3 ]] && echo open > "$tmp/fd3" || echo closed > "$tmp/fd3"
   printf '%s\n' "$stub_out"; return "${stub_rc:-0}"
 }
 HOW_TO_PROVIDER=stub
@@ -181,6 +182,22 @@ assert_eq "prompt_command: array appended once" 'a _how_to_restore_glob' "$("$BA
   "PROMPT_COMMAND=(a); source '$here/how-to.bash'; source '$here/how-to.bash'; printf %s \"\${PROMPT_COMMAND[*]}\"" 2>/dev/null)"
 assert_eq "restore_glob: keeps \$?" 3 "$(_how_to_f=hB; set -f; (exit 3); _how_to_restore_glob; echo "$?${-//[^f]/}")"
 
+# --- spinner
+assert_eq "spin: frame 0"     $'\r| thinking 0s\e[K'   "$(_how_to_spin_frame 0 0)"
+assert_eq "spin: frame 3"     $'\r\\ thinking 12s\e[K' "$(_how_to_spin_frame 3 12)"
+assert_eq "spin: frame wraps" $'\r| thinking 1s\e[K'   "$(_how_to_spin_frame 4 1)"
+if type -P zsh >/dev/null; then
+  assert_eq "spin: frame matches zsh" "$(zsh -c "source '$here/how-to.zsh'; _how_to_spin_frame 7 42")" "$(_how_to_spin_frame 7 42)"
+fi
+assert_eq "spin: default on"  1 "$HOW_TO_SPINNER"
+assert_eq "spin: preset kept" 0 "$(HOW_TO_SPINNER=0; source "$here/how-to.bash"; echo "$HOW_TO_SPINNER")"
+assert_eq "spin: off when not a tty" 1 "$(_how_to_spin_on 2>/dev/null; echo $?)"
+assert_eq "spin: unset vars under set -u" 'ls|' "$( set -u; unset HOW_TO_SPINNER TERM; stub_out=ls; run x; echo "$pushed|$err")"
+stub_out=ls; run x; assert_eq "spin: provider without fd 3" closed "$(<"$tmp/fd3")"
+command sleep 30 & bg=$!
+stub_out=ls; SECONDS=0; run x; t=$SECONDS; kill "$bg"; wait "$bg" 2>/dev/null
+assert_eq "spin: does not wait on user's background job" 'ls|0' "$pushed|$(( t > 2 ))"
+
 # --- pty: interactive bash with expect playing the terminal
 if type -P expect >/dev/null; then
   cat > "$tmp/pty.exp" <<'EOF'
@@ -218,6 +235,52 @@ if {$mode eq "nounset"} {
   want "P> "
   send "echo GLOB-\$(\[\[ \$- == *f* \]\] && echo OFF || echo ON)\r"
   want $marker
+  done PTY-OK
+}
+if {$mode in {spin off dumb ctrlc-spin fail fast strict}} {
+  # Thinking indicator: drawn while the stub sleeps, erased before anything
+  # else is printed (the DSR query included).
+  if {$mode eq "dumb"} {
+    send "TERM=dumb\r"
+    want "P> "
+  } elseif {$mode eq "strict"} {
+    send "set -euo pipefail; shopt -s failglob nocasematch; IFS=:\r"
+    want "P> "
+  }
+  set all ""
+  if {$mode eq "off"} { send "HOW_TO_SPINNER=0 how-to x\r" } else { send "how-to x\r" }
+  if {$mode eq "spin" || $mode eq "strict"} {
+    want "| thinking 0s"
+    want "thinking 1s"
+  }
+  if {$mode eq "spin"} {
+    want "\033\[K\r\033\[K"
+    if {[string first "thinking 1s\033\[K\r\033\[K" $all] < 0} { done PTY-NOERASE }
+    if {[string first "\033\[5n" $all] >= 0} { done PTY-QUERY-FIRST }
+  }
+  if {$mode eq "ctrlc-spin"} {
+    want "thinking 0s"
+    send "\003"
+    want "P> "
+    set timeout 1
+    expect -ex "thinking" { done PTY-REDRAWN } timeout {}
+    set timeout 5
+    send "echo GLOB-\$(\[\[ \$- == *f* \]\] && echo OFF || echo ON)\r"
+    want $marker
+    done PTY-OK
+  }
+  if {$mode eq "fail"} {
+    want "nope"
+    if {[string first "\r\033\[Knope" $all] < 0} { done PTY-NOERASE }
+    done PTY-OK
+  }
+  want "\033\[5n"
+  send "\033\[0n"
+  want "P> "
+  send "\r"
+  want $marker
+  want "P> "
+  if {$mode ne "spin" && $mode ne "strict" && [string first "thinking" $all] >= 0} { done PTY-DREW }
   done PTY-OK
 }
 send "how-to x\r"
@@ -277,27 +340,34 @@ if {$mode eq "ctrlc"} {
 if {[string first "\[0n" $all] >= 0} { done PTY-ECHOED }
 done PTY-OK
 EOF
-  pty() {  # pty <mode: 0|seconds|none> <marker> <stub output>
-    printf '%s\n' "$3" > "$tmp/pty_cmd"
-    [[ $1 == typeahead ]] && echo 0.5 > "$tmp/pty_sleep" || : > "$tmp/pty_sleep"
+  pty() {  # pty <mode: 0|seconds|none|...> <stub sleep> <marker> <stub output>
+    printf '%s\n' "$4" > "$tmp/pty_cmd"
+    [[ -n $2 ]] && echo "$2" > "$tmp/pty_sleep" || : > "$tmp/pty_sleep"
     cat > "$tmp/pty_rc" <<EOF
 PS1='P> '; HISTFILE=; unset PROMPT_COMMAND
 source '$here/how-to.bash'
 HOW_TO_CONTEXT=() HOW_TO_PROVIDER=stub
 _how_to_provider_stub() { cat >/dev/null; [[ -s '$tmp/pty_sleep' ]] && command sleep \$(<'$tmp/pty_sleep'); cat '$tmp/pty_cmd'; }
 EOF
-    expect "$tmp/pty.exp" "$BASH" "$tmp/pty_rc" "$1" "$2"
+    expect "$tmp/pty.exp" "$BASH" "$tmp/pty_rc" "$1" "$3"
   }
-  assert_eq "pty: inserted"   PTY-OK "$(pty 0   INSERTED-42 'echo INSERTED-$((6*7))')"
-  assert_eq "pty: slow reply" PTY-OK "$(pty 0.3 INSERTED-42 'echo INSERTED-$((6*7))')"
-  assert_eq "pty: multi-line" PTY-OK "$(pty 0   B-2 $'echo A \\\n  && echo B-$((1+1))')"
-  assert_eq "pty: no reply"   PTY-OK "$(pty none 'echo NOREPLY-$((1+1))' 'echo NOREPLY-$((1+1))')"
-  assert_eq "pty: late reply re-enables query" PTY-OK "$(pty late LATE-2 'echo LATE-$((1+1))')"
-  assert_eq "pty: query retried after a while" PTY-OK "$(pty retry LATE-2 'echo LATE-$((1+1))')"
-  assert_eq "pty: ctrl-c restores tty" PTY-OK "$(pty ctrlc x 'echo NOREPLY')"
-  assert_eq "pty: glob back after expansion error" PTY-OK "$(pty nounset GLOB-ON 'echo x')"
-  assert_eq "pty: vi mode inserted" PTY-OK "$(pty vi INSERTED-42 'echo INSERTED-$((6*7))')"
-  assert_eq "pty: typeahead prints" PTY-OK "$(pty typeahead 'echo TA-$((1+1))' 'echo TA-$((1+1))')"
+  assert_eq "pty: inserted"   PTY-OK "$(pty 0   '' INSERTED-42 'echo INSERTED-$((6*7))')"
+  assert_eq "pty: slow reply" PTY-OK "$(pty 0.3 '' INSERTED-42 'echo INSERTED-$((6*7))')"
+  assert_eq "pty: multi-line" PTY-OK "$(pty 0   '' B-2 $'echo A \\\n  && echo B-$((1+1))')"
+  assert_eq "pty: no reply"   PTY-OK "$(pty none '' 'echo NOREPLY-$((1+1))' 'echo NOREPLY-$((1+1))')"
+  assert_eq "pty: late reply re-enables query" PTY-OK "$(pty late '' LATE-2 'echo LATE-$((1+1))')"
+  assert_eq "pty: query retried after a while" PTY-OK "$(pty retry '' LATE-2 'echo LATE-$((1+1))')"
+  assert_eq "pty: ctrl-c restores tty" PTY-OK "$(pty ctrlc '' x 'echo NOREPLY')"
+  assert_eq "pty: glob back after expansion error" PTY-OK "$(pty nounset '' GLOB-ON 'echo x')"
+  assert_eq "pty: vi mode inserted" PTY-OK "$(pty vi '' INSERTED-42 'echo INSERTED-$((6*7))')"
+  assert_eq "pty: typeahead prints" PTY-OK "$(pty typeahead 0.5 'echo TA-$((1+1))' 'echo TA-$((1+1))')"
+  assert_eq "pty: spinner draws and clears"     PTY-OK "$(pty spin 1.3 SB-42 'echo SB-$((6*7))')"
+  assert_eq "pty: spinner off"                  PTY-OK "$(pty off 0.4 SB-42 'echo SB-$((6*7))')"
+  assert_eq "pty: spinner off for dumb TERM"    PTY-OK "$(pty dumb 0.4 SB-42 'echo SB-$((6*7))')"
+  assert_eq "pty: spinner ctrl-c"               PTY-OK "$(pty ctrlc-spin 3 GLOB-ON 'echo x')"
+  assert_eq "pty: spinner erased before error"  PTY-OK "$(pty fail 0.4 x 'HOWTO_FAIL: nope')"
+  assert_eq "pty: no spinner for fast provider" PTY-OK "$(pty fast 0 SB-42 'echo SB-$((6*7))')"
+  assert_eq "pty: spinner survives strict options" PTY-OK "$(pty strict 1.3 SB-42 'echo SB-$((6*7))')"
 else
   echo 'skip pty (no expect)'
 fi

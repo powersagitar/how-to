@@ -50,6 +50,8 @@ _how_to_clean() {
 # appending its name.
 declare -p HOW_TO_CONTEXT &>/dev/null || HOW_TO_CONTEXT=(os shell cwd git tools)
 declare -p HOW_TO_TOOLS &>/dev/null   || HOW_TO_TOOLS=(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)
+# 0 turns the "thinking" indicator off.
+declare -p HOW_TO_SPINNER &>/dev/null || HOW_TO_SPINNER=1
 
 _how_to_context_os()    { local -; printf '%s\n' "os: $(command uname -sr)"; }
 _how_to_context_shell() { local -; printf '%s\n' "shell: bash $BASH_VERSION"; }
@@ -149,6 +151,40 @@ _how_to_run() {
   _how_to_main "$@"
 }
 
+# --- thinking indicator -----------------------------------------------------
+# One frame: \r<c> thinking <n>s\e[K, <c> from | / - \ by tick.
+_how_to_spin_frame() {
+  local -
+  local chars='|/-\'
+  printf '\r%s thinking %ds\e[K' "${chars:$1%4:1}" "$2"
+}
+
+_how_to_spin_on() {
+  local -
+  [[ ${HOW_TO_SPINNER-1} != 0 && ${TERM-} != dumb && -t 2 ]]
+}
+
+# stdin is a pipe nobody writes to: draw on each 0.1 s timeout, and leave
+# without writing at EOF. SIGINT keeps its default action.
+_how_to_spin() {
+  local -
+  _how_to_spin_on || return 0
+  # SECONDS only ticks on whole wall-clock seconds; EPOCHREALTIME (bash 5+,
+  # digits only, so a decimal comma doesn't matter) counts microseconds.
+  local start tick=0 r
+  if [[ -n ${EPOCHREALTIME-} ]]; then start=${EPOCHREALTIME//[!0-9]/}; else start=$SECONDS; fi
+  while :; do
+    IFS= read -r -t 0.1 _ && r=0 || r=$?
+    (( r > 128 )) || return 0
+    if [[ -n ${EPOCHREALTIME-} ]]; then
+      _how_to_spin_frame "$tick" "$(( (${EPOCHREALTIME//[!0-9]/} - start) / 1000000 ))" >&2
+    else
+      _how_to_spin_frame "$tick" "$(( SECONDS - start ))" >&2
+    fi
+    tick=$(( tick + 1 ))
+  done
+}
+
 _how_to_main() {
   # Through the alias: restore globbing before `local -`, so every return path
   # keeps it restored. Called directly, leave it as it is.
@@ -174,9 +210,15 @@ _how_to_main() {
     return 1
   fi
 
-  local msg raw cmd l fail found=
+  local msg raw cmd l fail found= rc bg
   msg="$(_how_to_context)"$'\n'"Request: $*"
-  if ! raw=$(printf '%s\n' "$msg" | "$fn" "$HOW_TO_SYSTEM_PROMPT"); then
+  # Wait for the spinner only if the substitution set $! (else $! may be a
+  # job of the user's, which could run for a long time).
+  bg=${!-}
+  { raw=$(printf '%s\n' "$msg" | "$fn" "$HOW_TO_SYSTEM_PROMPT" 3>&-); rc=$?; } 3> >(_how_to_spin)
+  [[ ${!-} != "$bg" ]] && wait "$!" 2>/dev/null
+  _how_to_spin_on && printf '\r\e[K' >&2
+  if (( rc )); then
     printf '%s\n' 'how-to: provider failed' >&2
     return 1
   fi
