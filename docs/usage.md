@@ -2,10 +2,28 @@
 
 ## Install
 
-Add to `~/.zshrc`:
+With [Homebrew](https://brew.sh) (macOS or Linux):
+
+```sh
+brew install powersagitar/tap/how-to
+```
+
+Then add to `~/.zshrc`:
 
 ```zsh
-source /path/to/how-to/src/how-to.zsh
+source /opt/homebrew/opt/how-to/share/how-to/how-to.zsh
+```
+
+The path above is for Apple silicon. Elsewhere, replace `/opt/homebrew` with
+the output of `brew --prefix` (`/usr/local` on Intel macOS,
+`/home/linuxbrew/.linuxbrew` on Linux). `brew info how-to` prints the exact
+lines. The `opt` path stays the same across upgrades.
+
+Without Homebrew, clone the repository and source the file from it:
+
+```sh
+git clone https://github.com/powersagitar/how-to ~/.how-to
+echo 'source ~/.how-to/src/how-to.zsh' >> ~/.zshrc
 ```
 
 `how-to` must be sourced, not run as a script: a child process cannot type
@@ -17,10 +35,11 @@ The default provider needs `claude` on your `PATH` and logged in.
 
 ### bash
 
-Add to `~/.bashrc`:
+Add to `~/.bashrc` (Homebrew path, or `~/.how-to/src/how-to.bash` for a
+clone):
 
 ```bash
-source /path/to/how-to/src/how-to.bash
+source /opt/homebrew/opt/how-to/share/how-to/how-to.bash
 ```
 
 Requires bash 4.4 or newer. macOS ships bash 3.2 as `/bin/bash`; install a
