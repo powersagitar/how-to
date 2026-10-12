@@ -1,8 +1,9 @@
 name: release
 
 # Pushing a tag vX.Y.Z runs the full test workflow; if every job passes, this
-# creates a GitHub release for the tag with how-to-X.Y.Z.tar.gz, its .sha256,
-# and how-to.rb (a Homebrew formula pointing at that tarball).
+# creates a GitHub release for the tag with how-to-X.Y.Z.tar.gz and its
+# .sha256. The Homebrew formula lives in powersagitar/homebrew-tap, whose daily
+# autobump workflow opens a pull request for each new release.
 
 on:
   push:
@@ -33,20 +34,16 @@ jobs:
         run: |
           [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag $TAG is not vX.Y.Z"; exit 1; }
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
-      - name: Build tarball and formula
+      - name: Build tarball
         run: |
           name=how-to-$VERSION
           out=$RUNNER_TEMP/dist && mkdir -p "$out"
           git archive --format=tar.gz --prefix="$name/" -o "$out/$name.tar.gz" "$TAG" \
             src/how-to.zsh src/how-to.bash LICENSE README.md docs/usage.md
-          sha=$(cd "$out" && sha256sum "$name.tar.gz" | tee "$name.tar.gz.sha256" | cut -d' ' -f1)
-          url=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$name.tar.gz
-          sed -e "s|@URL@|$url|" -e "s|@SHA256@|$sha|" -e '1,/^class /{/^#/d;}' \
-            .github/homebrew/how-to.rb > "$out/how-to.rb"
+          (cd "$out" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           tar tzf "$out/$name.tar.gz"
-          cat "$out/how-to.rb"
           echo "DIST=$out" >> "$GITHUB_ENV"
       - name: Create release
         run: |
           gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes \
-            "$DIST/how-to-$VERSION.tar.gz" "$DIST/how-to-$VERSION.tar.gz.sha256" "$DIST/how-to.rb"
+            "$DIST/how-to-$VERSION.tar.gz" "$DIST/how-to-$VERSION.tar.gz.sha256"
