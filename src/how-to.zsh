@@ -67,22 +67,30 @@ _how_to_context_tools() {
 
 # Exit statuses are not kept by the shell, so a precmd hook records them in
 # step with history event numbers. The command text is read back from history
-# when how-to runs.
+# when how-to runs. The text stored here only checks that an event number
+# still holds the same command (history can be renumbered or reloaded).
 (( ${+_how_to_hist_num} )) || typeset -ga _how_to_hist_num=()
 (( ${+_how_to_hist_rc} ))  || typeset -ga _how_to_hist_rc=()
+(( ${+_how_to_hist_txt} )) || typeset -ga _how_to_hist_txt=()
 
-# _how_to_hist_add <event> <rc>: append, or replace the last entry when it is
-# the same event. Keeps the newest 100.
+# _how_to_hist_add <event> <rc> <text>: append, or replace the last entry when
+# it is the same event. Keeps the newest 100.
 _how_to_hist_add() {
   emulate -L zsh
   if (( $#_how_to_hist_num && _how_to_hist_num[-1] == $1 )); then
     _how_to_hist_rc[-1]=$2
+    _how_to_hist_txt[-1]=$3
   else
     _how_to_hist_num+=($1)
     _how_to_hist_rc+=($2)
+    _how_to_hist_txt+=("$3")
   fi
-  (( $#_how_to_hist_num > 100 )) && _how_to_hist_num=(${_how_to_hist_num[-100,-1]})
-  (( $#_how_to_hist_rc > 100 )) && _how_to_hist_rc=(${_how_to_hist_rc[-100,-1]})
+  if (( $#_how_to_hist_num > 100 )); then
+    _how_to_hist_num=(${_how_to_hist_num[-100,-1]})
+    _how_to_hist_rc=(${_how_to_hist_rc[-100,-1]})
+    _how_to_hist_txt=("${(@)_how_to_hist_txt[-100,-1]}")
+  fi
+  return 0
 }
 
 # Command text of a history event; non-zero if it is gone.
@@ -101,8 +109,7 @@ _how_to_hist_lines() {
   (( $#idx > HOW_TO_HISTORY )) && idx=(${idx[-$HOW_TO_HISTORY,-1]})
   for i in $idx; do
     text=$(_how_to_hist_text ${_how_to_hist_num[i]}) || continue
-    text=${text##[[:space:]]##}
-    [[ -n $text ]] || continue
+    [[ -n $text && $text == ${_how_to_hist_txt[i]} ]] || continue
     text=${text//$'\n'/\\n}
     (( ${#text} > 500 )) && text="${text[1,500]}…"
     print -r -- "history: [exit ${_how_to_hist_rc[i]}] $text"
@@ -111,15 +118,23 @@ _how_to_hist_lines() {
 
 _how_to_context_history() { emulate -L zsh; _how_to_hist_lines $HISTCMD }
 
+# preexec hook: a command ran, so the next prompt has a status to record.
+# (Ctrl-C or an empty Enter at a prompt runs precmd without a command.)
+_how_to_hist_ran() { emulate -L zsh; typeset -g _how_to_hist_flag=1 }
+
 # precmd hook. $? must be read first: emulate would reset it to 0.
 _how_to_record() {
   local rc=$?
   emulate -L zsh
   if (( ! ${+_how_to_hist_ready} )); then
     typeset -g _how_to_hist_ready=1
+    unset _how_to_hist_flag
     return 0
   fi
-  _how_to_hist_add $(( HISTCMD - 1 )) $rc
+  (( ${+_how_to_hist_flag} )) || return 0
+  unset _how_to_hist_flag
+  local ev=$(( HISTCMD - 1 ))
+  _how_to_hist_add $ev $rc "$(_how_to_hist_text $ev)"
 }
 
 # Print the <context> block built from HOW_TO_CONTEXT. Missing or failing
@@ -227,9 +242,10 @@ function how-to {
 }
 
 # Record exit statuses for the history context (interactive shells only).
-unset _how_to_hist_ready
+unset _how_to_hist_ready _how_to_hist_flag
 if [[ -o interactive ]]; then
   autoload -Uz add-zsh-hook && add-zsh-hook precmd _how_to_record
+  add-zsh-hook preexec _how_to_hist_ran
 fi
 
 # Keep globs like *.log in the request from being expanded by the shell.

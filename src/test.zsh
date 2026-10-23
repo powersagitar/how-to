@@ -46,56 +46,66 @@ assert_eq "shell" "shell: zsh $ZSH_VERSION" "$(_how_to_context_shell)"
 assert_eq "hist: default count" 5 "$HOW_TO_HISTORY"
 assert_eq "hist: order and limit" $'history: [exit 0] cmd3\nhistory: [exit 1] cmd4' "$(
   _how_to_hist_text() { print -r -- "cmd$1" }
-  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
 assert_eq "hist: current event skipped" 'history: [exit 0] cmd4' "$(
   _how_to_hist_text() { print -r -- "cmd$1" }
-  _how_to_hist_num=(4 5) _how_to_hist_rc=(0 0) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+  _how_to_hist_num=(4 5) _how_to_hist_rc=(0 0) _how_to_hist_txt=(cmd4 cmd5) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
 assert_eq "hist: off at 0" '' "$(
   _how_to_hist_text() { print -r -- "cmd$1" }
-  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=0; _how_to_hist_lines 9)"
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=0; _how_to_hist_lines 9)"
 assert_eq "hist: off when empty" '' "$(
   _how_to_hist_text() { print -r -- "cmd$1" }
-  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=; _how_to_hist_lines 9)"
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=; _how_to_hist_lines 9)"
 assert_eq "hist: off for non-number" '' "$(
   _how_to_hist_text() { print -r -- "cmd$1" }
-  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=abc; _how_to_hist_lines 9)"
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=abc; _how_to_hist_lines 9)"
 assert_eq "hist: nothing recorded" '' "$(_how_to_hist_num=() _how_to_hist_rc=(); _how_to_hist_lines 9 2>&1)"
 assert_eq "hist: N above count" 'history: [exit 0] cmd1' "$(
   _how_to_hist_text() { print -r -- "cmd$1" }
-  _how_to_hist_num=(1) _how_to_hist_rc=(0) HOW_TO_HISTORY=50; _how_to_hist_lines 9)"
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=(cmd1) HOW_TO_HISTORY=50; _how_to_hist_lines 9)"
 assert_eq "hist: stale higher events skipped" $'history: [exit 0] cmd3\nhistory: [exit 0] cmd4' "$(
   _how_to_hist_text() { print -r -- "cmd$1" }
-  _how_to_hist_num=(90 91 3 4) _how_to_hist_rc=(0 0 0 0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+  _how_to_hist_num=(90 91 3 4) _how_to_hist_rc=(0 0 0 0) _how_to_hist_txt=(cmd90 cmd91 cmd3 cmd4) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
 assert_eq "hist: unreadable skipped" 'history: [exit 0] cmd2' "$(
   _how_to_hist_text() { [[ $1 == 2 ]] && print cmd2 }
-  _how_to_hist_num=(1 2) _how_to_hist_rc=(0 0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+  _how_to_hist_num=(1 2) _how_to_hist_rc=(0 0) _how_to_hist_txt=(cmd1 cmd2) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
 assert_eq "hist: newline escaped" 'history: [exit 0] a\nb' "$(
   _how_to_hist_text() { print -r -- $'a\nb' }
-  _how_to_hist_num=(1) _how_to_hist_rc=(0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=($'a\nb') HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
 assert_eq "hist: truncated" "history: [exit 0] ${(l:500::x:)}…" "$(
   _how_to_hist_text() { print -r -- ${(l:501::x:)} }
-  _how_to_hist_num=(1) _how_to_hist_rc=(0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=(${(l:501::x:)}) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
 assert_eq "hist: verbatim text" "history: [exit 0] printf '%s\\n' \"\$x\" \\t" "$(
   _how_to_hist_text() { print -r -- "printf '%s\\n' \"\$x\" \\t" }
-  _how_to_hist_num=(1) _how_to_hist_rc=(0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
-assert_eq "hist: add appends" '1 2|0 1' "$(
-  _how_to_hist_num=() _how_to_hist_rc=()
-  _how_to_hist_add 1 0; _how_to_hist_add 2 1; print -r -- "$_how_to_hist_num|$_how_to_hist_rc")"
-assert_eq "hist: add replaces last" '1 2|0 7' "$(
-  _how_to_hist_num=() _how_to_hist_rc=()
-  _how_to_hist_add 1 0; _how_to_hist_add 2 1; _how_to_hist_add 2 7; print -r -- "$_how_to_hist_num|$_how_to_hist_rc")"
-assert_eq "hist: add trims to 100" '100 6 105' "$(
-  _how_to_hist_num=() _how_to_hist_rc=()
-  for i in {1..105}; _how_to_hist_add $i 0
-  print ${#_how_to_hist_num} ${_how_to_hist_num[1]} ${_how_to_hist_num[-1]})"
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=("printf '%s\\n' \"\$x\" \\t") HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: add appends" '1 2|0 1|a b c' "$(
+  _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  _how_to_hist_add 1 0 a; _how_to_hist_add 2 1 'b c'; print -r -- "$_how_to_hist_num|$_how_to_hist_rc|${_how_to_hist_txt[1]} ${_how_to_hist_txt[2]}")"
+assert_eq "hist: add replaces last" '1 2|0 7|2|b2' "$(
+  _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  _how_to_hist_add 1 0 a; _how_to_hist_add 2 1 b; _how_to_hist_add 2 7 b2; print -r -- "$_how_to_hist_num|$_how_to_hist_rc|${#_how_to_hist_txt}|${_how_to_hist_txt[2]}")"
+assert_eq "hist: add trims to 100" '100 6 105 100 100 t6 t105' "$(
+  _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  for i in {1..105}; _how_to_hist_add $i 0 t$i
+  print ${#_how_to_hist_num} ${_how_to_hist_num[1]} ${_how_to_hist_num[-1]} ${#_how_to_hist_rc} ${#_how_to_hist_txt} ${_how_to_hist_txt[1]} ${_how_to_hist_txt[-1]})"
+assert_eq "hist: add returns 0" 0 "$(_how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=(); _how_to_hist_add 1 0 a; print $?)"
+assert_eq "hist: renumbered event skipped" 'history: [exit 0] cmd3' "$(
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(3 4) _how_to_hist_rc=(0 1) _how_to_hist_txt=(cmd3 other) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
 assert_eq "hist: first record skipped" '' "$(
   unset _how_to_hist_ready; _how_to_hist_num=() _how_to_hist_rc=()
   _how_to_record; print -r -- "$_how_to_hist_num")"
+assert_eq "hist: no command, no record" '1 2|0 1' "$(
+  _how_to_hist_ready=1; unset _how_to_hist_flag; _how_to_hist_num=(1 2) _how_to_hist_rc=(0 1) _how_to_hist_txt=(cmd1 cmd2)
+  (exit 130); _how_to_record; print -r -- "$_how_to_hist_num|$_how_to_hist_rc")"
+assert_eq "hist: command ran, record and clear" "1 2 $(( HISTCMD - 1 ))|0 1 130|" "$(
+  _how_to_hist_ready=1; _how_to_hist_ran; _how_to_hist_num=(1 2) _how_to_hist_rc=(0 1) _how_to_hist_txt=(cmd1 cmd2)
+  (exit 130); _how_to_record; print -r -- "$_how_to_hist_num|$_how_to_hist_rc|${_how_to_hist_flag-}")"
 assert_eq "hist: ksharrays" $'history: [exit 0] cmd3\nhistory: [exit 1] cmd4' "$(
   setopt ksharrays
   _how_to_hist_text() { print -r -- "cmd$1" }
-  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
-assert_eq "hist: hook installed once" 1 "$(zsh -fic 'source '$here'/how-to.zsh; source '$here'/how-to.zsh; print ${#${(M)precmd_functions:#_how_to_record}}' 2>/dev/null | tail -1)"
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+assert_eq "hist: hooks installed once" '1 1' "$(zsh -fic 'source '$here'/how-to.zsh; source '$here'/how-to.zsh; print ${#${(M)precmd_functions:#_how_to_record}} ${#${(M)preexec_functions:#_how_to_hist_ran}}' 2>/dev/null | tail -1)"
 assert_eq "prompt: history line" 1 "$([[ $HOW_TO_SYSTEM_PROMPT == *'"history:" lines are the user'"'"'s latest commands, oldest first; "that"/"it" usually means the last one.'* ]] && print 1)"
 
 # --- how-to end to end (stub provider, captured push)
@@ -246,6 +256,8 @@ if {$mode eq "spin"} {
     send "$c\r"
     want "P> "
   }
+  send "\003"
+  want "P> "
   send "how-to x\r"
   landed
 } elseif {$mode eq "fail"} {
