@@ -186,22 +186,31 @@ _how_to_context_history() {
 # changes an option.
 _how_to_record() {
   local rc=$?
-  local IFS=$' \t\n' last= ev= text= pc=() c n=${#_how_to_hist_num[@]}
+  local IFS=$' \t\n' last= ev= text= pc=() c all n=${#_how_to_hist_num[@]}
   last=$(_how_to_hist_last) && ev=${last%% *} text=${last#* }
   # Something put in front of the hook may have changed $?: record nothing,
   # and move back to the front once. (Case folding under nocasematch can't
-  # change these matches.)
+  # change these matches.) Before bash 5.1 only element 0 of an array runs,
+  # so only element 0 counts; $PROMPT_COMMAND is element 0.
   c=${PROMPT_COMMAND[0]-}; c=${c%%[$'\n';]*}
-  if [[ ${PROMPT_COMMAND[*]-} == *_how_to_record* && $c != _how_to_record ]]; then
+  if (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 501 )); then
+    all=${PROMPT_COMMAND[*]-}
+  else
+    all=${PROMPT_COMMAND-}
+  fi
+  if [[ $all == *_how_to_record* && $c != _how_to_record ]]; then
     _how_to_hist_seen=$ev
     [[ -v _how_to_hist_moved ]] && return "$rc"
     _how_to_hist_moved=1
-    if [[ $(declare -p PROMPT_COMMAND) == 'declare -a'* ]]; then
+    if (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 501 )) &&
+       [[ $(declare -p PROMPT_COMMAND) == 'declare -a'* ]]; then
       for c in "${PROMPT_COMMAND[@]}"; do
         [[ $c == _how_to_record ]] || pc+=("${c//_how_to_record/:}")
       done
       PROMPT_COMMAND=(_how_to_record "${pc[@]}")
     else
+      # A string, or element 0 of an array: assigning to the plain name sets
+      # element 0 and keeps the rest.
       PROMPT_COMMAND=_how_to_record$'\n'${PROMPT_COMMAND//_how_to_record/:}
     fi
     return "$rc"
@@ -446,12 +455,15 @@ _how_to_restore_glob() {
 }
 
 # _how_to_record goes first, to see the command's $? before other hooks change
-# it; _how_to_restore_glob goes last.
+# it; _how_to_restore_glob goes last. Before bash 5.1 only element 0 of an
+# array PROMPT_COMMAND runs, so there it is treated as a string: assigning to
+# the plain name sets element 0 and keeps the rest.
 unset _how_to_hist_ready _how_to_hist_moved
 if [[ $- == *i* ]]; then
   bind -m emacs -x '"\e[0n": _how_to_insert' 2>/dev/null
   bind -m vi-insert -x '"\e[0n": _how_to_insert' 2>/dev/null
-  if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
+  if (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 501 )) &&
+     [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
     [[ " ${PROMPT_COMMAND[*]} " == *' _how_to_record '* ]] ||
       PROMPT_COMMAND=(_how_to_record "${PROMPT_COMMAND[@]}")
     [[ " ${PROMPT_COMMAND[*]} " == *' _how_to_restore_glob '* ]] ||

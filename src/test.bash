@@ -152,8 +152,17 @@ refront() {  # one hook call for event 6 after 5: "status|state|"
 }
 assert_eq "hist: re-front (string)" $'4|5|1|cmd5|6|_how_to_record\nfoo\n:\nbar' "$(
   PROMPT_COMMAND=$'foo\n_how_to_record\nbar'; refront; printf '%s' "$PROMPT_COMMAND")"
-assert_eq "hist: re-front (array)" '4|5|1|cmd5|6|_how_to_record foo bar' "$(
-  PROMPT_COMMAND=(foo _how_to_record bar); refront; printf '%s' "${PROMPT_COMMAND[*]}")"
+if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+  assert_eq "hist: re-front (array)" '4|5|1|cmd5|6|_how_to_record foo bar' "$(
+    PROMPT_COMMAND=(foo _how_to_record bar); refront; printf '%s' "${PROMPT_COMMAND[*]}")"
+else
+  # Before 5.1 only element 0 runs: it is handled as a string, and a hook
+  # in a later element (which never runs) does not count.
+  assert_eq "hist: re-front (array, < 5.1)" $'4|5|1|cmd5|6|<_how_to_record\nfoo\n:><bar>' "$(
+    PROMPT_COMMAND=($'foo\n_how_to_record' bar); refront; printf '<%s>' "${PROMPT_COMMAND[@]}")"
+  assert_eq "hist: later element absent (< 5.1)" '4|5 6|1 4|cmd5 cmd6|6|<foo><_how_to_record>' "$(
+    PROMPT_COMMAND=(foo _how_to_record); refront; printf '<%s>' "${PROMPT_COMMAND[@]}")"
+fi
 assert_eq "hist: re-front only once" $'5|1|cmd5|7|foo\n_how_to_record' "$(
   PROMPT_COMMAND=$'foo\n_how_to_record'; refront >/dev/null; PROMPT_COMMAND=$'foo\n_how_to_record'
   _how_to_hist_last() { echo '7 cmd7'; }; _how_to_record; printf '%s|%s' "$(rec_state)" "$PROMPT_COMMAND")"
@@ -162,11 +171,11 @@ assert_eq "hist: front records (array)" '4|5 6|1 4|cmd5 cmd6|6|' "$(PROMPT_COMMA
 assert_eq "hist: absent records" '4|5 6|1 4|cmd5 cmd6|6|' "$(PROMPT_COMMAND=foo; refront)"
 assert_eq "hist: hook installed once (string)" 1 "$("$BASH" --norc -ic "PROMPT_COMMAND='echo hi'; source '$here/how-to.bash'; source '$here/how-to.bash'; grep -c _how_to_record <<< \"\$PROMPT_COMMAND\"" 2>/dev/null)"
 assert_eq "hist: hook first (string)" '_how_to_record' "$("$BASH" --norc -ic "PROMPT_COMMAND='echo hi'; source '$here/how-to.bash'; head -1 <<< \"\$PROMPT_COMMAND\"" 2>/dev/null)"
+assert_eq "hist: hook installed once (array)" 1 "$("$BASH" --norc -ic "PROMPT_COMMAND=(a b); source '$here/how-to.bash'; source '$here/how-to.bash'; printf '%s\n' \"\${PROMPT_COMMAND[@]}\" | grep -c _how_to_record" 2>/dev/null)"
 if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
-  assert_eq "hist: hook installed once (array)" 1 "$("$BASH" --norc -ic "PROMPT_COMMAND=(a b); source '$here/how-to.bash'; source '$here/how-to.bash'; printf '%s\n' \"\${PROMPT_COMMAND[@]}\" | grep -c _how_to_record" 2>/dev/null)"
   assert_eq "hist: hook first (array)" '_how_to_record' "$("$BASH" --norc -ic "PROMPT_COMMAND=(a b); source '$here/how-to.bash'; printf '%s' \"\${PROMPT_COMMAND[0]}\"" 2>/dev/null)"
 else
-  echo 'skip hist: array PROMPT_COMMAND (bash < 5.1)'
+  assert_eq "hist: hook first (array, < 5.1)" '_how_to_record' "$("$BASH" --norc -ic "PROMPT_COMMAND=(a b); source '$here/how-to.bash'; head -1 <<< \"\${PROMPT_COMMAND[0]}\"" 2>/dev/null)"
 fi
 
 # --- context assembly
@@ -308,8 +317,14 @@ done
 
 assert_eq "prompt_command: string appended once" $'_how_to_record\necho hi\n_how_to_restore_glob' "$("$BASH" --norc -ic \
   "PROMPT_COMMAND='echo hi'; source '$here/how-to.bash'; source '$here/how-to.bash'; printf %s \"\$PROMPT_COMMAND\"" 2>/dev/null)"
-assert_eq "prompt_command: array appended once" '_how_to_record a _how_to_restore_glob' "$("$BASH" --norc -ic \
-  "PROMPT_COMMAND=(a); source '$here/how-to.bash'; source '$here/how-to.bash'; printf %s \"\${PROMPT_COMMAND[*]}\"" 2>/dev/null)"
+if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+  assert_eq "prompt_command: array appended once" '_how_to_record a _how_to_restore_glob' "$("$BASH" --norc -ic \
+    "PROMPT_COMMAND=(a); source '$here/how-to.bash'; source '$here/how-to.bash'; printf %s \"\${PROMPT_COMMAND[*]}\"" 2>/dev/null)"
+else
+  # Before 5.1 only element 0 runs, so both hooks go into it.
+  assert_eq "prompt_command: array element 0 once (< 5.1)" $'<_how_to_record\na\n_how_to_restore_glob><b>' "$("$BASH" --norc -ic \
+    "PROMPT_COMMAND=(a b); source '$here/how-to.bash'; source '$here/how-to.bash'; printf '<%s>' \"\${PROMPT_COMMAND[@]}\"" 2>/dev/null)"
+fi
 assert_eq "restore_glob: keeps \$?" 3 "$(_how_to_f=hB; set -f; (exit 3); _how_to_restore_glob; echo "$?${-//[^f]/}")"
 
 # --- spinner
@@ -503,11 +518,11 @@ if {$mode eq "ctrlc"} {
 if {[string first "\[0n" $all] >= 0} { done PTY-ECHOED }
 done PTY-OK
 EOF
-  pty() {  # pty <mode: 0|seconds|none|...> <stub sleep> <marker> <stub output>
+  pty() {  # pty <mode: 0|seconds|none|...> <stub sleep> <marker> <stub output> [PROMPT_COMMAND setup]
     printf '%s\n' "$4" > "$tmp/pty_cmd"
     [[ -n $2 ]] && echo "$2" > "$tmp/pty_sleep" || : > "$tmp/pty_sleep"
     cat > "$tmp/pty_rc" <<EOF
-PS1='P> '; HISTFILE=; unset PROMPT_COMMAND
+PS1='P> '; HISTFILE=; ${5:-unset PROMPT_COMMAND}
 source '$here/how-to.bash'
 HOW_TO_CONTEXT=() HOW_TO_PROVIDER=stub
 _how_to_provider_stub() { cat >/dev/null; [[ -s '$tmp/pty_sleep' ]] && command sleep \$(<'$tmp/pty_sleep'); cat '$tmp/pty_cmd'; }
@@ -522,6 +537,8 @@ EOF
   assert_eq "pty: query retried after a while" PTY-OK "$(pty retry '' LATE-2 'echo LATE-$((1+1))')"
   assert_eq "pty: ctrl-c restores tty" PTY-OK "$(pty ctrlc '' x 'echo NOREPLY')"
   assert_eq "pty: glob back after expansion error" PTY-OK "$(pty nounset '' GLOB-ON 'echo x')"
+  # With an array PROMPT_COMMAND (only element 0 runs before 5.1).
+  assert_eq "pty: glob back (array PROMPT_COMMAND)" PTY-OK "$(pty nounset '' GLOB-ON 'echo x' 'PROMPT_COMMAND=(:)')"
   assert_eq "pty: vi mode inserted" PTY-OK "$(pty vi '' INSERTED-42 'echo INSERTED-$((6*7))')"
   assert_eq "pty: typeahead prints" PTY-OK "$(pty typeahead 0.5 'echo TA-$((1+1))' 'echo TA-$((1+1))')"
   assert_eq "pty: spinner draws and clears"     PTY-OK "$(pty spin 1.3 SB-42 'echo SB-$((6*7))')"
@@ -541,6 +558,18 @@ _how_to_provider_stub() { cat > '$tmp/bhist_in'; cat '$tmp/pty_cmd'; }
 EOF
   assert_eq "pty: history recorded" PTY-OK "$(printf '%s\n' 'echo BH-$((6*7))' > "$tmp/pty_cmd"; expect "$tmp/pty.exp" "$BASH" "$tmp/pty_hrc" hist BH-42 1)"
   assert_eq "pty: history context" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' "$tmp/bhist_in")"
+  # Array PROMPT_COMMAND: the hook records, and the user's own element 0
+  # still runs at every prompt (before 5.1 only element 0 runs at all).
+  printf '%s\n' old1 old2 > "$tmp/bhist"; : > "$tmp/uhook"; : > "$tmp/bhist_in"
+  cat > "$tmp/pty_harc" <<EOF
+PS1='P> '; HISTFILE='$tmp/bhist'; HISTCONTROL=ignorespace; PROMPT_COMMAND=('echo U >> $tmp/uhook')
+source '$here/how-to.bash'
+HOW_TO_CONTEXT=(history) HOW_TO_PROVIDER=stub
+_how_to_provider_stub() { cat > '$tmp/bhist_in'; cat '$tmp/pty_cmd'; }
+EOF
+  assert_eq "pty: history recorded (array)" PTY-OK "$(expect "$tmp/pty.exp" "$BASH" "$tmp/pty_harc" hist BH-42 1)"
+  assert_eq "pty: history context (array)" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' "$tmp/bhist_in")"
+  assert_eq "pty: user's element 0 runs (array)" yes "$( (( $(wc -l < "$tmp/uhook") >= 5 )) && echo yes)"
 else
   echo 'skip pty (no expect)'
 fi
