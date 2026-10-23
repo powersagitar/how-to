@@ -63,6 +63,11 @@ Neither shell keeps past exit statuses, so a prompt hook records them, keyed
 by history event number. Command text is never stored by the hook; it is
 read from history when `how-to` runs.
 
+> Update: the implementation also keeps the command text in a third array,
+> `_how_to_hist_txt`, so a later renumbering of history can be detected (the
+> text no longer matches) and the event skipped. The provider still reads
+> the text from history and sends it only when it equals the stored text.
+
 Observed behavior both designs rely on (bash 5, `zsh -f`):
 
 - In a prompt hook, `$HISTCMD` is the number the *next* command will get;
@@ -95,6 +100,17 @@ has happened.
 precmd _how_to_record` (no duplicate on re-source), only in interactive
 shells. On every prompt it records `$?` for event `HISTCMD - 1`, always:
 
+> Update: not always. It records only after a command actually ran, gated
+> by a `preexec` hook (`_how_to_hist_ran` / `_how_to_hist_flag`), so a
+> prompt redrawn without running anything records nothing.
+>
+> Under `HIST_IGNORE_SPACE`, a space-prefixed line's text stays in
+> `_how_to_hist_txt` until the next command replaces that event. It is never
+> sent (the current-event filter and the text comparison stop it), and it is
+> acceptable because the shell holds the same text in its history list at
+> that moment.
+
+
 - After a space-prefixed line, the entry for its number is overwritten when
   the next command, which takes that number, finishes.
 - An empty Enter keeps `$?`, so re-recording the same event is harmless.
@@ -116,7 +132,18 @@ install.
 
 It records only when `HISTCMD - 1` differs from the last recorded event
 number, so a line bash dropped from history never overwrites the previous
-command's status. Known limitation: with `ignoredups`, an identical command
+command's status.
+
+> Update: the hook takes the newest entry from `history 1` (number and
+> text), not from `HISTCMD`. It also records when the number is unchanged
+> but the text differs: `erasedups` renumbered a new command onto the last
+> event, and that replaces the entry.
+>
+> Re-front: if `_how_to_record` is no longer first in `PROMPT_COMMAND`
+> (element 0 before bash 5.1), `$?` may have been changed, so that prompt
+> records nothing, and the hook moves itself to the front once (other
+> mentions become `:`). The first-call flag is set there too, so the next
+> prompt records normally. Known limitation: with `ignoredups`, an identical command
 repeated right away keeps the first run's status.
 
 With history off (`set +o history`, `HISTSIZE=0`), `HISTCMD` never advances,
@@ -130,10 +157,10 @@ nothing is recorded and the provider prints nothing.
 1. Return if `HOW_TO_HISTORY` is not a positive integer or nothing is
    recorded.
 2. Take the recorded events with number below the current `$HISTCMD` (this
-   drops the `how-to` call), newest last, and keep the last
+   drops the `how-to` call; bash uses the newest `history 1` number), newest last, and keep the last
    `HOW_TO_HISTORY`.
-3. For each, read the text with `fc -ln <n> <n>` (bash: strip the leading
-   whitespace `fc` adds). Skip the event if that fails or the text is empty.
+3. For each, read the text with `fc -ln <n> <n>` (bash: `history -p "!N"`,
+   with `histchars` reset locally, so no stripping is needed). Skip the event if that fails or the text is empty.
 4. Escape newlines, truncate, print `history: [exit <rc>] <text>`.
 
 Conventions as for the other providers: zsh functions start with

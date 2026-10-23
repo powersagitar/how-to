@@ -145,16 +145,15 @@ history: [exit 2] make test
 Known limitations:
 
 - At most 100 entries are kept, so `HOW_TO_HISTORY` above 100 sends 100. A
-  huge value (bash `10#` arithmetic overflows) isn't supported.
+  very large values aren't supported.
 - Events that history renumbers are left out: bash `erasedups` and
   `history -c; history -r`, and zsh `fc -p`. The stored text no longer
   matches, so they're skipped.
 - Control characters in commands are shown differently in zsh and bash.
-- bash reads command text with `!N` history expansion, so changing
-  `histchars` breaks it.
 - If something is put before `_how_to_record` in `PROMPT_COMMAND`, the hook
-  moves itself back to the front once. That rewrites `PROMPT_COMMAND`, and
-  other mentions of `_how_to_record` in it become `:`.
+  moves itself back to the front once. The prompt where the move happens
+  records nothing. That rewrites `PROMPT_COMMAND`, and other mentions of
+  `_how_to_record` in it become `:`.
 - With an array `PROMPT_COMMAND`, bash before 5.1 runs only element 0, so
   the hooks go into element 0 there.
 

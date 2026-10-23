@@ -166,6 +166,13 @@ fi
 assert_eq "hist: re-front only once" $'5|1|cmd5|7|foo\n_how_to_record' "$(
   PROMPT_COMMAND=$'foo\n_how_to_record'; refront >/dev/null; PROMPT_COMMAND=$'foo\n_how_to_record'
   _how_to_hist_last() { echo '7 cmd7'; }; _how_to_record; printf '%s|%s' "$(rec_state)" "$PROMPT_COMMAND")"
+assert_eq "hist: re-front at first prompt sets ready, next prompt records" '|||6|1|7|3|cmd7' "$(
+  unset _how_to_hist_ready _how_to_hist_moved; _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  PROMPT_COMMAND=$'foo\n_how_to_record'
+  _how_to_hist_last() { echo '6 cmd6'; }; _how_to_record
+  s="$(rec_state)|${_how_to_hist_ready-unset}"
+  _how_to_hist_last() { echo '7 cmd7'; }; (exit 3); _how_to_record
+  echo "$s|${_how_to_hist_num[*]}|${_how_to_hist_rc[*]}|${_how_to_hist_txt[*]}")"
 assert_eq "hist: front records" '4|5 6|1 4|cmd5 cmd6|6|' "$(PROMPT_COMMAND=$'_how_to_record\nfoo'; refront)"
 assert_eq "hist: front records (array)" '4|5 6|1 4|cmd5 cmd6|6|' "$(PROMPT_COMMAND=(_how_to_record foo); refront)"
 assert_eq "hist: absent records" '4|5 6|1 4|cmd5 cmd6|6|' "$(PROMPT_COMMAND=foo; refront)"
@@ -570,6 +577,18 @@ EOF
   assert_eq "pty: history recorded (array)" PTY-OK "$(expect "$tmp/pty.exp" "$BASH" "$tmp/pty_harc" hist BH-42 1)"
   assert_eq "pty: history context (array)" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' "$tmp/bhist_in")"
   assert_eq "pty: user's element 0 runs (array)" yes "$( (( $(wc -l < "$tmp/uhook") >= 5 )) && echo yes)"
+  # Something prepended to PROMPT_COMMAND after sourcing: the hook moves back
+  # to the front at the first prompt and the first real command is recorded.
+  printf '%s\n' old1 old2 > "$tmp/bhist"; : > "$tmp/bhist_in"
+  cat > "$tmp/pty_frc" <<EOF
+PS1='P> '; HISTFILE='$tmp/bhist'; HISTCONTROL=ignorespace; PROMPT_COMMAND=true
+source '$here/how-to.bash'
+foo() { :; }; PROMPT_COMMAND="foo;\$PROMPT_COMMAND"
+HOW_TO_CONTEXT=(history) HOW_TO_PROVIDER=stub
+_how_to_provider_stub() { cat > '$tmp/bhist_in'; cat '$tmp/pty_cmd'; }
+EOF
+  assert_eq "pty: history recorded (re-front)" PTY-OK "$(expect "$tmp/pty.exp" "$BASH" "$tmp/pty_frc" hist BH-42 1)"
+  assert_eq "pty: history context (re-front)" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' "$tmp/bhist_in")"
 else
   echo 'skip pty (no expect)'
 fi

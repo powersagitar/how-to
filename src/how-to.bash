@@ -199,7 +199,7 @@ _how_to_record() {
     all=${PROMPT_COMMAND-}
   fi
   if [[ $all == *_how_to_record* && $c != _how_to_record ]]; then
-    _how_to_hist_seen=$ev
+    _how_to_hist_ready=1 _how_to_hist_seen=$ev
     [[ -v _how_to_hist_moved ]] && return "$rc"
     _how_to_hist_moved=1
     if (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 501 )) &&
