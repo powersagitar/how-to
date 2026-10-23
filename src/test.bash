@@ -32,7 +32,7 @@ assert_eq "clean: indented fence dedents" $'a \\\n  && b' \
   "$(printf '%s\n' $'Run:\n   ```\n   a \\\n     && b\n   ```' | _how_to_clean)"
 
 # --- config
-assert_eq "ctx: default list" 'os shell cwd git tools' "${HOW_TO_CONTEXT[*]}"
+assert_eq "ctx: default list" 'os shell cwd git tools history' "${HOW_TO_CONTEXT[*]}"
 assert_eq "ctx: preset kept" 'os' "$(HOW_TO_CONTEXT=(os); source "$here/how-to.bash"; echo "${HOW_TO_CONTEXT[*]}")"
 assert_eq "ctx: empty preset kept" 0 "$(HOW_TO_CONTEXT=(); source "$here/how-to.bash"; echo "${#HOW_TO_CONTEXT[@]}")"
 if type -P zsh >/dev/null; then
@@ -46,6 +46,127 @@ if [[ -x /bin/bash ]] && (( $(/bin/bash -c 'echo ${BASH_VERSINFO[0]}') < 4 )); t
     "$(/bin/bash -c "source '$here/how-to.bash' 2>&1 >/dev/null; type _how_to_clean >/dev/null 2>&1 && echo DEFINED")"
 else
   echo 'skip old bash refused (/bin/bash is not < 4)'
+fi
+
+# --- history
+cmd_text() { _how_to_hist_text() { printf '%s\n' "cmd$1"; }; }
+assert_eq "hist: default count" 5 "$HOW_TO_HISTORY"
+assert_eq "hist: order and limit" $'history: [exit 0] cmd3\nhistory: [exit 1] cmd4' "$(cmd_text
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+assert_eq "hist: current event skipped" 'history: [exit 0] cmd4' "$(cmd_text
+  _how_to_hist_num=(4 5) _how_to_hist_rc=(0 0) _how_to_hist_txt=(cmd4 cmd5) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+assert_eq "hist: off at 0" '' "$(cmd_text
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=0; _how_to_hist_lines 9)"
+assert_eq "hist: off when empty" '' "$(cmd_text
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=; _how_to_hist_lines 9)"
+assert_eq "hist: off for non-number" '' "$(cmd_text
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=abc; _how_to_hist_lines 9)"
+assert_eq "hist: nothing recorded" '' "$(_how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=(); _how_to_hist_lines 9 2>&1)"
+assert_eq "hist: N above count" 'history: [exit 0] cmd1' "$(cmd_text
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=(cmd1) HOW_TO_HISTORY=50; _how_to_hist_lines 9)"
+assert_eq "hist: stale higher events skipped" $'history: [exit 0] cmd3\nhistory: [exit 0] cmd4' "$(cmd_text
+  _how_to_hist_num=(90 91 3 4) _how_to_hist_rc=(0 0 0 0) _how_to_hist_txt=(cmd90 cmd91 cmd3 cmd4) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: unreadable skipped" 'history: [exit 0] cmd2' "$(
+  _how_to_hist_text() { [[ $1 == 2 ]] && echo cmd2; }
+  _how_to_hist_num=(1 2) _how_to_hist_rc=(0 0) _how_to_hist_txt=(cmd1 cmd2) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: newline escaped" 'history: [exit 0] a\nb' "$(
+  _how_to_hist_text() { printf '%s\n' $'a\nb'; }
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=($'a\nb') HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+printf -v x501 '%501s' ''; x501=${x501// /x}
+assert_eq "hist: truncated" "history: [exit 0] ${x501:0:500}…" "$(
+  _how_to_hist_text() { printf '%s\n' "$x501"; }
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=("$x501") HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: verbatim text" "history: [exit 0] printf '%s\\n' \"\$x\" \\t" "$(
+  _how_to_hist_text() { printf '%s\n' "printf '%s\\n' \"\$x\" \\t"; }
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=("printf '%s\\n' \"\$x\" \\t") HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: text compared case-sensitively" '' "$(
+  shopt -s nocasematch; _how_to_hist_text() { echo LS; }
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) _how_to_hist_txt=(ls) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: add appends" '1 2|0 1|a b c' "$(
+  _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  _how_to_hist_add 1 0 a; _how_to_hist_add 2 1 'b c'; echo "${_how_to_hist_num[*]}|${_how_to_hist_rc[*]}|${_how_to_hist_txt[0]} ${_how_to_hist_txt[1]}")"
+assert_eq "hist: add replaces last" '1 2|0 7|2|b2' "$(
+  _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  _how_to_hist_add 1 0 a; _how_to_hist_add 2 1 b; _how_to_hist_add 2 7 b2; echo "${_how_to_hist_num[*]}|${_how_to_hist_rc[*]}|${#_how_to_hist_txt[@]}|${_how_to_hist_txt[1]}")"
+assert_eq "hist: add trims to 100" '100 6 105 100 100 t6 t105' "$(
+  _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  for i in {1..105}; do _how_to_hist_add "$i" 0 "t$i"; done
+  echo ${#_how_to_hist_num[@]} ${_how_to_hist_num[0]} ${_how_to_hist_num[-1]} ${#_how_to_hist_rc[@]} ${#_how_to_hist_txt[@]} ${_how_to_hist_txt[0]} ${_how_to_hist_txt[-1]})"
+assert_eq "hist: arrays stay in step" '100 100 100|2 0 t2|99 0 t99|100 9 c|101 2 e' "$(
+  _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  for i in {1..99}; do _how_to_hist_add "$i" 0 "t$i"; done
+  _how_to_hist_add 100 0 b; _how_to_hist_add 100 9 c; _how_to_hist_add 101 2 e
+  printf '%s %s %s' ${#_how_to_hist_num[@]} ${#_how_to_hist_rc[@]} ${#_how_to_hist_txt[@]}
+  for i in 0 -3 -2 -1; do printf '|%s %s %s' "${_how_to_hist_num[i]}" "${_how_to_hist_rc[i]}" "${_how_to_hist_txt[i]}"; done)"
+assert_eq "hist: add returns 0" 0 "$(_how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=(); _how_to_hist_add 1 0 a; echo $?)"
+assert_eq "hist: renumbered event skipped" 'history: [exit 0] cmd3' "$(cmd_text
+  _how_to_hist_num=(3 4) _how_to_hist_rc=(0 1) _how_to_hist_txt=(cmd3 other) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: hostile opts" $'history: [exit 0] cmd3\nhistory: [exit 1] cmd4' "$(
+  set -euo pipefail; shopt -s failglob nocasematch nullglob; IFS=:; cmd_text
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) _how_to_hist_txt=(cmd1 cmd2 cmd3 cmd4) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+
+# Real history in a subshell: `set -o history` and `history -s` fill it.
+assert_eq "hist: last entry" $'2 b\n  c' "$(set -o history; history -c; history -s a; history -s $'b\n  c'; _how_to_hist_last)"
+assert_eq "hist: last keeps leading space" '1  x' "$(set -o history; history -c; history -s ' x'; _how_to_hist_last)"
+assert_eq "hist: last of modified entry" '12 ls -l' "$(history() { printf '%s\n' '   12* ls -l'; }; _how_to_hist_last)"
+assert_eq "hist: last when empty" 1 "$(set -o history; history -c; _how_to_hist_last; echo $?)"
+assert_eq "hist: text" $'b\n  c|a|gone' "$(set -o history; history -c; history -s a; history -s $'b\n  c'; history -s d
+  printf '%s|%s|' "$(_how_to_hist_text 2)" "$(_how_to_hist_text 1)"; _how_to_hist_text 9 || echo gone)"
+assert_eq "hist: text with other histchars" 'a' "$(set -o history; history -c; history -s a; history -s b; histchars='%^#'; _how_to_hist_text 1)"
+assert_eq "hist: text leaves history alone" '2 b' "$(set -o history; history -c; history -s a; history -s b; _how_to_hist_text 1 >/dev/null; _how_to_hist_last)"
+assert_eq "hist: provider uses the newest entry" $'history: [exit 0] cmd3\nhistory: [exit 1] cmd4' "$(cmd_text
+  _how_to_hist_last() { echo '4 cmd4'; }
+  _how_to_hist_num=(3 4 5) _how_to_hist_rc=(0 1 0) _how_to_hist_txt=(cmd3 cmd4 cmd5); _how_to_context_history)"
+assert_eq "hist: provider without history" rc=0 "$(cmd_text; _how_to_hist_last() { return 1; }; _how_to_hist_num=(3) _how_to_hist_rc=(0) _how_to_hist_txt=(cmd3); _how_to_context_history; echo "rc=$?")"
+
+# _how_to_record, with the newest history entry stubbed.
+rec_state() { local IFS=' '; echo "${_how_to_hist_num[*]}|${_how_to_hist_rc[*]}|${_how_to_hist_txt[*]}|${_how_to_hist_seen-}"; }
+assert_eq "hist: first record skipped" '|||7|1' "$(
+  unset _how_to_hist_ready; _how_to_hist_num=() _how_to_hist_rc=() _how_to_hist_txt=()
+  _how_to_hist_last() { echo '7 x'; }; (exit 4); _how_to_record; echo "$(rec_state)|$_how_to_hist_ready")"
+assert_eq "hist: new event recorded" '5 6|1 3|cmd5 cmd6|6' "$(
+  _how_to_hist_ready=1 _how_to_hist_seen=5 _how_to_hist_num=(5) _how_to_hist_rc=(1) _how_to_hist_txt=(cmd5)
+  _how_to_hist_last() { echo '6 cmd6'; }; (exit 3); _how_to_record; rec_state)"
+assert_eq "hist: unchanged event not recorded" '5|1|cmd5|5' "$(
+  _how_to_hist_ready=1 _how_to_hist_seen=5 _how_to_hist_num=(5) _how_to_hist_rc=(1) _how_to_hist_txt=(cmd5)
+  _how_to_hist_last() { echo '5 cmd5'; }; (exit 130); _how_to_record; rec_state)"
+assert_eq "hist: renumbered onto same event" '4 5|0 2|a c|5' "$(
+  _how_to_hist_ready=1 _how_to_hist_seen=5 _how_to_hist_num=(4 5) _how_to_hist_rc=(0 1) _how_to_hist_txt=(a b)
+  _how_to_hist_last() { echo '5 c'; }; (exit 2); _how_to_record; rec_state)"
+assert_eq "hist: no history, no record" '5|1|cmd5|' "$(
+  _how_to_hist_ready=1 _how_to_hist_seen=5 _how_to_hist_num=(5) _how_to_hist_rc=(1) _how_to_hist_txt=(cmd5)
+  _how_to_hist_last() { return 1; }; (exit 3); _how_to_record; rec_state)"
+assert_eq "hist: record keeps status" 3 "$(_how_to_hist_ready=1; (exit 3); _how_to_record; echo $?)"
+assert_eq "hist: first record keeps status" 3 "$(unset _how_to_hist_ready; (exit 3); _how_to_record; echo $?)"
+assert_eq "hist: record hostile opts" '5 6|1 3|cmd5 cmd6|6|3' "$(
+  set -euo pipefail; shopt -s failglob nocasematch nullglob; IFS=:
+  _how_to_hist_ready=1 _how_to_hist_seen=5 _how_to_hist_num=(5) _how_to_hist_rc=(1) _how_to_hist_txt=(cmd5)
+  _how_to_hist_last() { echo '6 cmd6'; }; rc=0; (exit 3) || { _how_to_record || rc=$?; }; echo "$(rec_state)|$rc")"
+# Something put in front of the hook after sourcing: no record (its $? may
+# not be the command's), and the hook moves back to the front once.
+refront() {  # one hook call for event 6 after 5: "status|state|"
+  _how_to_hist_ready=1 _how_to_hist_seen=5 _how_to_hist_num=(5) _how_to_hist_rc=(1) _how_to_hist_txt=(cmd5)
+  unset _how_to_hist_moved
+  _how_to_hist_last() { echo '6 cmd6'; }
+  (exit 4); _how_to_record; printf '%s|%s|' "$?" "$(rec_state)"
+}
+assert_eq "hist: re-front (string)" $'4|5|1|cmd5|6|_how_to_record\nfoo\n:\nbar' "$(
+  PROMPT_COMMAND=$'foo\n_how_to_record\nbar'; refront; printf '%s' "$PROMPT_COMMAND")"
+assert_eq "hist: re-front (array)" '4|5|1|cmd5|6|_how_to_record foo bar' "$(
+  PROMPT_COMMAND=(foo _how_to_record bar); refront; printf '%s' "${PROMPT_COMMAND[*]}")"
+assert_eq "hist: re-front only once" $'5|1|cmd5|7|foo\n_how_to_record' "$(
+  PROMPT_COMMAND=$'foo\n_how_to_record'; refront >/dev/null; PROMPT_COMMAND=$'foo\n_how_to_record'
+  _how_to_hist_last() { echo '7 cmd7'; }; _how_to_record; printf '%s|%s' "$(rec_state)" "$PROMPT_COMMAND")"
+assert_eq "hist: front records" '4|5 6|1 4|cmd5 cmd6|6|' "$(PROMPT_COMMAND=$'_how_to_record\nfoo'; refront)"
+assert_eq "hist: front records (array)" '4|5 6|1 4|cmd5 cmd6|6|' "$(PROMPT_COMMAND=(_how_to_record foo); refront)"
+assert_eq "hist: absent records" '4|5 6|1 4|cmd5 cmd6|6|' "$(PROMPT_COMMAND=foo; refront)"
+assert_eq "hist: hook installed once (string)" 1 "$("$BASH" --norc -ic "PROMPT_COMMAND='echo hi'; source '$here/how-to.bash'; source '$here/how-to.bash'; grep -c _how_to_record <<< \"\$PROMPT_COMMAND\"" 2>/dev/null)"
+assert_eq "hist: hook first (string)" '_how_to_record' "$("$BASH" --norc -ic "PROMPT_COMMAND='echo hi'; source '$here/how-to.bash'; head -1 <<< \"\$PROMPT_COMMAND\"" 2>/dev/null)"
+if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+  assert_eq "hist: hook installed once (array)" 1 "$("$BASH" --norc -ic "PROMPT_COMMAND=(a b); source '$here/how-to.bash'; source '$here/how-to.bash'; printf '%s\n' \"\${PROMPT_COMMAND[@]}\" | grep -c _how_to_record" 2>/dev/null)"
+  assert_eq "hist: hook first (array)" '_how_to_record' "$("$BASH" --norc -ic "PROMPT_COMMAND=(a b); source '$here/how-to.bash'; printf '%s' \"\${PROMPT_COMMAND[0]}\"" 2>/dev/null)"
+else
+  echo 'skip hist: array PROMPT_COMMAND (bash < 5.1)'
 fi
 
 # --- context assembly
@@ -135,6 +256,13 @@ _how_to_provider_stub2() { cat >/dev/null; echo from-stub2; }
 alias_eval 'HOW_TO_PROVIDER=stub2 how-to x' 2>/dev/null
 assert_eq "alias: HOW_TO_ prefix applies to the call" from-stub2 "$pushed"
 assert_eq "alias: HOW_TO_ prefix not kept" stub "$HOW_TO_PROVIDER"
+hist_e2e() {  # hist_e2e <line>: history lines the provider got
+  ( cmd_text; _how_to_hist_last() { echo '4 how-to x'; }
+    _how_to_hist_num=(3) _how_to_hist_rc=(2) _how_to_hist_txt=(cmd3) HOW_TO_CONTEXT=(history)
+    stub_out=x; alias_eval "$1" 2>/dev/null; grep '^history:' "$tmp/in" )
+}
+assert_eq "hist: e2e" 'history: [exit 2] cmd3' "$(hist_e2e 'how-to x')"
+assert_eq "hist: prefix HOW_TO_HISTORY=0" '' "$(hist_e2e 'HOW_TO_HISTORY=0 how-to x')"
 _how_to_pending=stale; run
 assert_eq "main: clears stale pending" '' "$_how_to_pending"
 assert_eq "re-source ok" '' "$(source "$here/how-to.bash" 2>&1)"
@@ -178,9 +306,9 @@ for map in emacs vi-insert; do
     grep -qE '^"\\e\[0n":? "_how_to_insert"$' && echo yes)"
 done
 
-assert_eq "prompt_command: string appended once" $'echo hi\n_how_to_restore_glob' "$("$BASH" --norc -ic \
+assert_eq "prompt_command: string appended once" $'_how_to_record\necho hi\n_how_to_restore_glob' "$("$BASH" --norc -ic \
   "PROMPT_COMMAND='echo hi'; source '$here/how-to.bash'; source '$here/how-to.bash'; printf %s \"\$PROMPT_COMMAND\"" 2>/dev/null)"
-assert_eq "prompt_command: array appended once" 'a _how_to_restore_glob' "$("$BASH" --norc -ic \
+assert_eq "prompt_command: array appended once" '_how_to_record a _how_to_restore_glob' "$("$BASH" --norc -ic \
   "PROMPT_COMMAND=(a); source '$here/how-to.bash'; source '$here/how-to.bash'; printf %s \"\${PROMPT_COMMAND[*]}\"" 2>/dev/null)"
 assert_eq "restore_glob: keeps \$?" 3 "$(_how_to_f=hB; set -f; (exit 3); _how_to_restore_glob; echo "$?${-//[^f]/}")"
 
@@ -253,6 +381,21 @@ if {$mode eq "nounset"} {
   send "set -u; how-to x \$nosuch\r"
   want "P> "
   send "echo GLOB-\$(\[\[ \$- == *f* \]\] && echo OFF || echo ON)\r"
+  want $marker
+  done PTY-OK
+}
+if {$mode eq "hist"} {
+  # The space-prefixed line stays out of history, and neither it nor the
+  # empty Enter is recorded.
+  foreach c {"true" "false" " echo SECRET" ""} {
+    send "$c\r"
+    want "P> "
+  }
+  send "how-to x\r"
+  want "\033\[5n"
+  send "\033\[0n"
+  want "P> "
+  send "\r"
   want $marker
   done PTY-OK
 }
@@ -388,6 +531,16 @@ EOF
   assert_eq "pty: spinner erased before error"  PTY-OK "$(pty fail 0.4 x 'HOWTO_FAIL: nope')"
   assert_eq "pty: no spinner for fast provider" PTY-OK "$(pty fast 0 SB-42 'echo SB-$((6*7))')"
   assert_eq "pty: spinner survives strict options" PTY-OK "$(pty strict 1.3 SB-42 'echo SB-$((6*7))')"
+  # Lines loaded from HISTFILE are not sent: no status was recorded for them.
+  printf '%s\n' old1 old2 > "$tmp/bhist"
+  cat > "$tmp/pty_hrc" <<EOF
+PS1='P> '; HISTFILE='$tmp/bhist'; HISTCONTROL=ignorespace; PROMPT_COMMAND=true
+source '$here/how-to.bash'
+HOW_TO_CONTEXT=(history) HOW_TO_PROVIDER=stub
+_how_to_provider_stub() { cat > '$tmp/bhist_in'; cat '$tmp/pty_cmd'; }
+EOF
+  assert_eq "pty: history recorded" PTY-OK "$(printf '%s\n' 'echo BH-$((6*7))' > "$tmp/pty_cmd"; expect "$tmp/pty.exp" "$BASH" "$tmp/pty_hrc" hist BH-42 1)"
+  assert_eq "pty: history context" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' "$tmp/bhist_in")"
 else
   echo 'skip pty (no expect)'
 fi

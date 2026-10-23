@@ -48,8 +48,10 @@ _how_to_clean() {
 # Each name in HOW_TO_CONTEXT maps to _how_to_context_<name>, which prints
 # zero or more "key: value" lines. Add your own by defining the function and
 # appending its name.
-declare -p HOW_TO_CONTEXT &>/dev/null || HOW_TO_CONTEXT=(os shell cwd git tools)
+declare -p HOW_TO_CONTEXT &>/dev/null || HOW_TO_CONTEXT=(os shell cwd git tools history)
 declare -p HOW_TO_TOOLS &>/dev/null   || HOW_TO_TOOLS=(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)
+# How many recent commands the history provider sends; 0 turns it off.
+declare -p HOW_TO_HISTORY &>/dev/null || HOW_TO_HISTORY=5
 # 0 turns the "thinking" indicator off.
 declare -p HOW_TO_SPINNER &>/dev/null || HOW_TO_SPINNER=1
 
@@ -89,6 +91,137 @@ _how_to_context_tools() {
   done
   (( ${#found[@]} )) && printf '%s\n' "tools: ${found[*]}"
   return 0
+}
+
+# Exit statuses are not kept by the shell, so a PROMPT_COMMAND hook records
+# them in step with history event numbers. The command text is read back from
+# history when how-to runs. The text stored here only checks that an event
+# number still holds the same command (history can be renumbered or reloaded).
+# Event numbers come from the history listing, not HISTCMD: bash < 5.1 gives
+# HISTCMD=1 inside PROMPT_COMMAND and $(...).
+declare -p _how_to_hist_num &>/dev/null || _how_to_hist_num=()
+declare -p _how_to_hist_rc &>/dev/null  || _how_to_hist_rc=()
+declare -p _how_to_hist_txt &>/dev/null || _how_to_hist_txt=()
+
+# _how_to_hist_add <event> <rc> <text>: append, or replace the last entry when
+# it is the same event. Keeps the newest 100. No `local -` (see _how_to_record).
+_how_to_hist_add() {
+  local n=${#_how_to_hist_num[@]}
+  if (( n )) && (( _how_to_hist_num[n-1] == $1 )); then
+    _how_to_hist_rc[n-1]=$2
+    _how_to_hist_txt[n-1]=${3-}
+  else
+    _how_to_hist_num+=("$1")
+    _how_to_hist_rc+=("$2")
+    _how_to_hist_txt+=("${3-}")
+  fi
+  if (( ${#_how_to_hist_num[@]} > 100 )); then
+    _how_to_hist_num=("${_how_to_hist_num[@]: -100}")
+    _how_to_hist_rc=("${_how_to_hist_rc[@]: -100}")
+    _how_to_hist_txt=("${_how_to_hist_txt[@]: -100}")
+  fi
+  return 0
+}
+
+# The newest history entry as "<event> <text>"; non-zero if there is none.
+# A listing, because inside PROMPT_COMMAND fc and history -p take the newest
+# entry for their own command line and skip it.
+_how_to_hist_last() {
+  local -
+  local l n
+  l=$(HISTTIMEFORMAT= history 1) || return 1
+  l=${l#"${l%%[! ]*}"}                        # "%5d%c %s": number, ' ' or '*',
+  n=${l%%[!0-9]*}                             # a space, the text
+  [[ -n $n ]] || return 1
+  l=${l#"$n"}
+  printf '%s %s\n' "$n" "${l#[* ] }"
+}
+
+# Command text of a history event; non-zero if it is gone. Not fc: in bash
+# 5.1+, `fc -l N N` lists from the first entry when N is the newest entry
+# before the current command. history -p deletes the newest entry when it is
+# the current command line, so it runs in a subshell; histchars is reset so
+# that "!N" is always an event.
+_how_to_hist_text() (
+  local -
+  local histchars='!^#'
+  history -p "!$1" 2>/dev/null
+)
+
+# _how_to_hist_lines <current_event>: the last HOW_TO_HISTORY recorded events
+# below the current one, oldest first, as "history: [exit N] text".
+_how_to_hist_lines() {
+  local -
+  local opts i text idx=() k=0
+  opts=$(shopt -p nocasematch nullglob dotglob failglob extglob) || :
+  shopt -u nocasematch
+  [[ ${HOW_TO_HISTORY-} =~ ^[0-9]+$ ]] && (( 10#$HOW_TO_HISTORY > 0 )) && k=$(( 10#$HOW_TO_HISTORY ))
+  for i in "${!_how_to_hist_num[@]}"; do
+    (( k && _how_to_hist_num[i] < $1 )) && idx+=("$i")
+  done
+  (( ${#idx[@]} > k )) && idx=("${idx[@]: -k}")
+  for i in "${idx[@]}"; do
+    text=$(_how_to_hist_text "${_how_to_hist_num[i]}") || continue
+    [[ -n $text && $text == "${_how_to_hist_txt[i]-}" ]] || continue
+    text=${text//$'\n'/\\n}
+    (( ${#text} > 500 )) && text="${text:0:500}…"
+    printf '%s\n' "history: [exit ${_how_to_hist_rc[i]}] $text"
+  done
+  eval "$opts"
+  return 0
+}
+
+# Every recorded event is at or below the newest entry, and the how-to line
+# itself is not recorded until the next prompt.
+_how_to_context_history() {
+  local -
+  local last
+  last=$(_how_to_hist_last) || return 0
+  _how_to_hist_lines "$(( ${last%% *} + 1 ))"
+}
+
+# PROMPT_COMMAND hook; returns the $? it saw. No `local -`: in bash < 5.1,
+# returning from a function with it turns history back on for the rest of
+# PROMPT_COMMAND, whose later lines are then saved as commands. Nothing here
+# changes an option.
+_how_to_record() {
+  local rc=$?
+  local IFS=$' \t\n' last= ev= text= pc=() c n=${#_how_to_hist_num[@]}
+  last=$(_how_to_hist_last) && ev=${last%% *} text=${last#* }
+  # Something put in front of the hook may have changed $?: record nothing,
+  # and move back to the front once. (Case folding under nocasematch can't
+  # change these matches.)
+  c=${PROMPT_COMMAND[0]-}; c=${c%%[$'\n';]*}
+  if [[ ${PROMPT_COMMAND[*]-} == *_how_to_record* && $c != _how_to_record ]]; then
+    _how_to_hist_seen=$ev
+    [[ -v _how_to_hist_moved ]] && return "$rc"
+    _how_to_hist_moved=1
+    if [[ $(declare -p PROMPT_COMMAND) == 'declare -a'* ]]; then
+      for c in "${PROMPT_COMMAND[@]}"; do
+        [[ $c == _how_to_record ]] || pc+=("${c//_how_to_record/:}")
+      done
+      PROMPT_COMMAND=(_how_to_record "${pc[@]}")
+    else
+      PROMPT_COMMAND=_how_to_record$'\n'${PROMPT_COMMAND//_how_to_record/:}
+    fi
+    return "$rc"
+  fi
+  # The first prompt after sourcing: the newest entry is from HISTFILE or
+  # before, and $? is whatever the rc file left.
+  if [[ ! -v _how_to_hist_ready ]]; then
+    _how_to_hist_ready=1 _how_to_hist_seen=$ev
+    return "$rc"
+  fi
+  if [[ -n $ev && $ev != "${_how_to_hist_seen-}" ]]; then
+    _how_to_hist_add "$ev" "$rc" "$text"
+  elif [[ -n $ev ]] && (( n && _how_to_hist_num[n-1] == ev )) &&
+       [ "${_how_to_hist_txt[n-1]}" != "$text" ]; then
+    # Same number, new command: erasedups renumbered it onto this event.
+    # (test, not [[ ]], so nocasematch can't fold case.)
+    _how_to_hist_add "$ev" "$rc" "$text"
+  fi
+  _how_to_hist_seen=$ev
+  return "$rc"
 }
 
 # Print the <context> block built from HOW_TO_CONTEXT. Missing or failing
@@ -312,14 +445,22 @@ _how_to_restore_glob() {
   return "$rc"
 }
 
+# _how_to_record goes first, to see the command's $? before other hooks change
+# it; _how_to_restore_glob goes last.
+unset _how_to_hist_ready _how_to_hist_moved
 if [[ $- == *i* ]]; then
   bind -m emacs -x '"\e[0n": _how_to_insert' 2>/dev/null
   bind -m vi-insert -x '"\e[0n": _how_to_insert' 2>/dev/null
   if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
+    [[ " ${PROMPT_COMMAND[*]} " == *' _how_to_record '* ]] ||
+      PROMPT_COMMAND=(_how_to_record "${PROMPT_COMMAND[@]}")
     [[ " ${PROMPT_COMMAND[*]} " == *' _how_to_restore_glob '* ]] ||
       PROMPT_COMMAND+=(_how_to_restore_glob)
-  elif [[ ${PROMPT_COMMAND-} != *_how_to_restore_glob* ]]; then
-    PROMPT_COMMAND=${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}_how_to_restore_glob
+  else
+    [[ ${PROMPT_COMMAND-} == *_how_to_record* ]] ||
+      PROMPT_COMMAND=_how_to_record${PROMPT_COMMAND:+$'\n'$PROMPT_COMMAND}
+    [[ $PROMPT_COMMAND == *_how_to_restore_glob* ]] ||
+      PROMPT_COMMAND=$PROMPT_COMMAND$'\n'_how_to_restore_glob
   fi
 fi
 
