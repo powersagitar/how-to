@@ -53,6 +53,18 @@ points are discovered by function name:
   Each prints `key: value` lines into a `<context>` block. Missing, failing, or
   empty providers are skipped silently.
 
+Exit statuses for the `history` context provider come from a prompt hook,
+`_how_to_record` (zsh `precmd`, bash `PROMPT_COMMAND`). It stores
+`(event, $?, text)` in `_how_to_hist_num`, `_how_to_hist_rc` and
+`_how_to_hist_txt` (newest 100, via `_how_to_hist_add`); the first call after
+sourcing is skipped (`_how_to_hist_ready`). zsh records only when a command
+ran since the last prompt (preexec `_how_to_hist_ran` sets
+`_how_to_hist_flag`), so Ctrl-C at an empty prompt doesn't overwrite a
+status. `_how_to_context_history` reads command text at call time
+(`_how_to_hist_text`: zsh `fc`, bash `history -p "!N"`) for recorded events
+below the current one. `_how_to_hist_txt` is the text stored at record time:
+an event whose current text differs (history renumbered) is skipped.
+
 When there's no command to give, the model replies `HOWTO_FAIL: <reason>`.
 This line can appear anywhere in the reply, including inside a fence, and only
 the reason is shown on stderr. `_how_to_clean` keeps only the inside of the
@@ -111,6 +123,18 @@ Config variables are only set when unset (zsh `(( ${+VAR} )) ||`, bash
   vi-insert, only in interactive shells) to `_how_to_insert`, which unsets
   `_how_to_no_dsr` (a late reply proves the terminal answers) and, if
   `_how_to_pending` is set, sets `READLINE_LINE`.
+- `_how_to_record` is prepended to `PROMPT_COMMAND` and returns the `$?` it
+  saw. It starts with `local rc=$?` before anything else, an exception to the
+  "starts with `local -`" rule (zsh does the same before `emulate -L zsh`).
+- PROMPT_COMMAND functions (`_how_to_record`, `_how_to_hist_add`) have no
+  `local -`, because on 4.4/5.0 it turns history back on in PROMPT_COMMAND.
+- Event numbers come from `history 1`, not `HISTCMD` (which is 1 in
+  PROMPT_COMMAND and `$(...)` on bash < 5.1). Command text uses
+  `history -p "!N"`, not `fc` (5.1+ `fc -ln N N` lists from entry 1).
+- If `_how_to_record` isn't first in `PROMPT_COMMAND`, it moves itself to the
+  front once (`_how_to_hist_moved`), replacing other mentions with `:`. The
+  install uses the array form only on 5.1+; before that only element 0 runs,
+  so the hooks go into element 0.
 - pty tests drive an interactive bash with `expect`. Use the unbraced
   `expect -ex $pat {...} timeout {...}` form (a one-line braced body is
   treated as a single pattern) and `-ex` for escape sequences.
@@ -120,5 +144,7 @@ Config variables are only set when unset (zsh `(( ${+VAR} )) ||`, bash
 - Tests stub `_how_to_push` and use a `stub` provider. The provider runs in a
   pipeline subshell, so it writes what it captures to files in `$tmp` instead
   of setting variables.
+- The hist tests stub the text readers (`_how_to_hist_text`, and in bash
+  `_how_to_hist_last`) instead of driving real history.
 - The claude provider is tested with a fake `claude` script prepended to
   `PATH`, which is possible because `command` bypasses functions, not `PATH`.

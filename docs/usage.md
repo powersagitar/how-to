@@ -109,6 +109,55 @@ The quoting advice above applies too. `cond && how-to ...` and
 call only if its name starts with `HOW_TO_` (`HOW_TO_PROVIDER=ollama how-to
 ...`); any other assignment in front is ignored.
 
+## Recent commands
+
+Each request carries your last few commands and their exit statuses, so
+"fix that" works:
+
+```
+$ make test
+make: *** [test] Error 2
+$ how-to fix that
+```
+
+The model sees:
+
+```
+history: [exit 0] cd ~/proj
+history: [exit 2] make test
+```
+
+- Oldest first, at most `HOW_TO_HISTORY` lines (default 5). Set
+  `HOW_TO_HISTORY=0` to turn it off, in your rc file or in front of one call.
+- Only commands from this shell since sourcing. Lines loaded from the history
+  file or imported from other sessions are left out, and so is the `how-to`
+  call itself.
+- A command the shell keeps out of history is never sent. Start a command
+  with a space to keep it private when `HIST_IGNORE_SPACE` (zsh) or
+  `HISTCONTROL=ignorespace` (bash) is set. `HISTIGNORE` and `zshaddhistory`
+  work the same way.
+- A command is cut at 500 characters, and each newline is shown as `\n`.
+- Output is never sent, only the command and its status.
+- bash prepends `_how_to_record` to `PROMPT_COMMAND`. Keep it if you reassign
+  `PROMPT_COMMAND`. With `HISTCONTROL=ignoredups`, an immediate repeat keeps
+  the first run's status.
+
+Known limitations:
+
+- At most 100 entries are kept, so `HOW_TO_HISTORY` above 100 sends 100. A
+  huge value (bash `10#` arithmetic overflows) isn't supported.
+- Events that history renumbers are left out: bash `erasedups` and
+  `history -c; history -r`, and zsh `fc -p`. The stored text no longer
+  matches, so they're skipped.
+- Control characters in commands are shown differently in zsh and bash.
+- bash reads command text with `!N` history expansion, so changing
+  `histchars` breaks it.
+- If something is put before `_how_to_record` in `PROMPT_COMMAND`, the hook
+  moves itself back to the front once. That rewrites `PROMPT_COMMAND`, and
+  other mentions of `_how_to_record` in it become `:`.
+- With an array `PROMPT_COMMAND`, bash before 5.1 runs only element 0, so
+  the hooks go into element 0 there.
+
 ## Progress indicator
 
 While the model works, stderr shows a spinner and the seconds waited so far,
@@ -126,9 +175,10 @@ Set these in `~/.zshrc` or `~/.bashrc` (before or after sourcing).
 |----------|---------|---------|
 | `HOW_TO_PROVIDER` | `claude` | which `_how_to_provider_<name>` to use |
 | `HOW_TO_CLAUDE_ARGS` | `--model haiku` | extra flags for `claude --print` |
-| `HOW_TO_CONTEXT` | `(os shell cwd git tools)` | context providers, in order |
+| `HOW_TO_CONTEXT` | `(os shell cwd git tools history)` | context providers, in order |
 | `HOW_TO_TOOLS` | `(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)` | tools reported as installed, if found |
 | `HOW_TO_SYSTEM_PROMPT` | see `src/how-to.zsh` | rules sent to the model |
+| `HOW_TO_HISTORY` | `5` | recent commands sent with their exit status; `0` turns it off |
 | `HOW_TO_SPINNER` | `1` | `0` turns the progress indicator off |
 
 `HOW_TO_CONTEXT` and `HOW_TO_TOOLS` can be arrays or space-separated strings.

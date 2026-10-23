@@ -73,6 +73,10 @@ Observed behavior both designs rely on (bash 5, `zsh -f`):
   number until the next line is entered, which reuses it.
 - bash: a line dropped by `HISTCONTROL`/`HISTIGNORE` gets no number;
   `HISTCMD` does not advance.
+- bash < 5.1: `HISTCMD` is 1 inside `PROMPT_COMMAND` and `$(...)`, so the
+  bash hook takes event numbers from `history 1` instead.
+- bash 5.1+: `fc -ln N N` for the entry before the current command lists
+  from entry 1, so bash reads text with `history -p "!N"` instead.
 
 State, in both shells: two global arrays, `_how_to_hist_num` and
 `_how_to_hist_rc`, appended in step and trimmed to the newest 100 entries.
