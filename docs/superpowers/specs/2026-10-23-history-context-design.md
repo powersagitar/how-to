@@ -27,7 +27,9 @@ Success criteria:
 - On by default with 5 commands; `HOW_TO_HISTORY` sets the count, `0` turns
   it off.
 - Lines the shell keeps out of history (`HIST_IGNORE_SPACE` /
-  `HISTCONTROL=ignorespace`, `HISTIGNORE`, `zshaddhistory`) are never sent.
+  `HISTCONTROL=ignorespace`, `HISTIGNORE`, `zshaddhistory` returning 1) are
+  never sent. A `zshaddhistory` return of 2 keeps the line in the session's
+  history (only `HISTFILE` skips it), so it is sent.
   how-to adds no filtering rules of its own; it reads history after the shell
   has filtered it.
 - The `how-to` call itself is never sent.

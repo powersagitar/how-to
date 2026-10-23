@@ -297,6 +297,25 @@ EOF
   assert_eq "pty: no spinner for fast provider" PTY-OK "$(zpty_run fast 0 ZS-42 'echo ZS-$((6*7))')"
   assert_eq "pty: history recorded" PTY-OK "$(print -r -- 0 > $tmp/pty_sleep; print -r -- 'echo ZH-$((6*7))' > $tmp/pty_cmd; expect $tmp/zpty.exp $tmp/zdh hist ZH-42)"
   assert_eq "pty: history context" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' $tmp/zhist_in)"
+  # zshaddhistory returning 1 keeps a line out of history like HIST_IGNORE_SPACE.
+  mkdir $tmp/zdha
+  printf 'old1\nold2\n' > $tmp/zhist; : > $tmp/zhist_in
+  cat > $tmp/zdha/.zshrc <<EOF
+PS1='P> '; PROMPT_EOL_MARK=''; HISTFILE='$tmp/zhist'
+zshaddhistory() { [[ \$1 != *SECRET* ]] }
+source '$here/how-to.zsh'
+HOW_TO_CONTEXT=(history) HOW_TO_PROVIDER=stub
+_how_to_provider_stub() { cat > '$tmp/zhist_in'; cat '$tmp/pty_cmd' }
+EOF
+  assert_eq "pty: history recorded (zshaddhistory)" PTY-OK "$(expect $tmp/zpty.exp $tmp/zdha hist ZH-42)"
+  assert_eq "pty: history context (zshaddhistory)" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' $tmp/zhist_in)"
+  # Returning 2 only keeps the line out of HISTFILE: it stays in the
+  # session's history, so it is sent (documented).
+  mkdir $tmp/zdh2
+  printf 'old1\nold2\n' > $tmp/zhist; : > $tmp/zhist_in
+  sed 's/!= \*SECRET\* \]\] }$/!= *SECRET* ]] || return 2 }/' $tmp/zdha/.zshrc > $tmp/zdh2/.zshrc
+  assert_eq "pty: history recorded (zshaddhistory 2)" PTY-OK "$(expect $tmp/zpty.exp $tmp/zdh2 hist ZH-42)"
+  assert_eq "pty: history context (zshaddhistory 2)" $'history: [exit 0] true\nhistory: [exit 1] false\nhistory: [exit 0]  echo SECRET' "$(grep '^history:' $tmp/zhist_in)"
 else
   print 'skip pty (no expect)'
 fi

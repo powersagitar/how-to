@@ -589,6 +589,16 @@ _how_to_provider_stub() { cat > '$tmp/bhist_in'; cat '$tmp/pty_cmd'; }
 EOF
   assert_eq "pty: history recorded (re-front)" PTY-OK "$(expect "$tmp/pty.exp" "$BASH" "$tmp/pty_frc" hist BH-42 1)"
   assert_eq "pty: history context (re-front)" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' "$tmp/bhist_in")"
+  # HISTIGNORE keeps a line out of history like ignorespace.
+  printf '%s\n' old1 old2 > "$tmp/bhist"; : > "$tmp/bhist_in"
+  cat > "$tmp/pty_hirc" <<EOF
+PS1='P> '; HISTFILE='$tmp/bhist'; unset HISTCONTROL; HISTIGNORE='*SECRET*'; PROMPT_COMMAND=true
+source '$here/how-to.bash'
+HOW_TO_CONTEXT=(history) HOW_TO_PROVIDER=stub
+_how_to_provider_stub() { cat > '$tmp/bhist_in'; cat '$tmp/pty_cmd'; }
+EOF
+  assert_eq "pty: history recorded (HISTIGNORE)" PTY-OK "$(expect "$tmp/pty.exp" "$BASH" "$tmp/pty_hirc" hist BH-42 1)"
+  assert_eq "pty: history context (HISTIGNORE)" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' "$tmp/bhist_in")"
 else
   echo 'skip pty (no expect)'
 fi

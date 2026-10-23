@@ -134,8 +134,9 @@ history: [exit 2] make test
   call itself.
 - A command the shell keeps out of history is never sent. Start a command
   with a space to keep it private when `HIST_IGNORE_SPACE` (zsh) or
-  `HISTCONTROL=ignorespace` (bash) is set. `HISTIGNORE` and `zshaddhistory`
-  work the same way.
+  `HISTCONTROL=ignorespace` (bash) is set. `HISTIGNORE` and a
+  `zshaddhistory` hook that returns 1 work the same way. A hook that returns
+  2 only keeps the line out of `HISTFILE`, so it is still sent.
 - A command is cut at 500 characters, and each newline is shown as `\n`.
 - Output is never sent, only the command and its status.
 - bash prepends `_how_to_record` to `PROMPT_COMMAND`. Keep it if you reassign
