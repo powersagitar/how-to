@@ -116,6 +116,7 @@ described in <context>.
 Output ONLY the command: no explanation, no markdown, no code fences.
 Prefer tools listed in "tools:" when they fit; otherwise use standard POSIX/
 OS-native utilities.
+"history:" lines are the user'"'"'s latest commands, oldest first; "that"/"it" usually means the last one.
 Use a single line; chain with && or | when needed.
 Do not refuse destructive commands; the user reviews before running.
 If the request cannot be done with a shell command, output exactly:

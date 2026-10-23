@@ -28,8 +28,10 @@ _how_to_clean() {
 # Each name in HOW_TO_CONTEXT maps to _how_to_context_<name>, which prints
 # zero or more "key: value" lines. Add your own by defining the function and
 # appending its name.
-(( ${+HOW_TO_CONTEXT} )) || typeset -ga HOW_TO_CONTEXT=(os shell cwd git tools)
+(( ${+HOW_TO_CONTEXT} )) || typeset -ga HOW_TO_CONTEXT=(os shell cwd git tools history)
 (( ${+HOW_TO_TOOLS} ))   || typeset -ga HOW_TO_TOOLS=(rg fd jq yq tokei cloc fzf bat eza gh docker kubectl brew git python3 node)
+# How many recent commands the history provider sends; 0 turns it off.
+(( ${+HOW_TO_HISTORY} )) || typeset -g HOW_TO_HISTORY=5
 # 0 turns the "thinking" indicator off.
 (( ${+HOW_TO_SPINNER} )) || typeset -g HOW_TO_SPINNER=1
 
@@ -63,6 +65,63 @@ _how_to_context_tools() {
   return 0
 }
 
+# Exit statuses are not kept by the shell, so a precmd hook records them in
+# step with history event numbers. The command text is read back from history
+# when how-to runs.
+(( ${+_how_to_hist_num} )) || typeset -ga _how_to_hist_num=()
+(( ${+_how_to_hist_rc} ))  || typeset -ga _how_to_hist_rc=()
+
+# _how_to_hist_add <event> <rc>: append, or replace the last entry when it is
+# the same event. Keeps the newest 100.
+_how_to_hist_add() {
+  emulate -L zsh
+  if (( $#_how_to_hist_num && _how_to_hist_num[-1] == $1 )); then
+    _how_to_hist_rc[-1]=$2
+  else
+    _how_to_hist_num+=($1)
+    _how_to_hist_rc+=($2)
+  fi
+  (( $#_how_to_hist_num > 100 )) && _how_to_hist_num=(${_how_to_hist_num[-100,-1]})
+  (( $#_how_to_hist_rc > 100 )) && _how_to_hist_rc=(${_how_to_hist_rc[-100,-1]})
+}
+
+# Command text of a history event; non-zero if it is gone.
+_how_to_hist_text() { emulate -L zsh; fc -ln $1 $1 2>/dev/null }
+
+# _how_to_hist_lines <current_event>: the last HOW_TO_HISTORY recorded events
+# below the current one, oldest first, as "history: [exit N] text".
+_how_to_hist_lines() {
+  emulate -L zsh
+  [[ $HOW_TO_HISTORY == <1-> ]] || return 0
+  local -a idx
+  local i text
+  for (( i = 1; i <= $#_how_to_hist_num; i++ )); do
+    (( _how_to_hist_num[i] < $1 )) && idx+=($i)
+  done
+  (( $#idx > HOW_TO_HISTORY )) && idx=(${idx[-$HOW_TO_HISTORY,-1]})
+  for i in $idx; do
+    text=$(_how_to_hist_text ${_how_to_hist_num[i]}) || continue
+    text=${text##[[:space:]]##}
+    [[ -n $text ]] || continue
+    text=${text//$'\n'/\\n}
+    (( ${#text} > 500 )) && text="${text[1,500]}…"
+    print -r -- "history: [exit ${_how_to_hist_rc[i]}] $text"
+  done
+}
+
+_how_to_context_history() { emulate -L zsh; _how_to_hist_lines $HISTCMD }
+
+# precmd hook. $? must be read first: emulate would reset it to 0.
+_how_to_record() {
+  local rc=$?
+  emulate -L zsh
+  if (( ! ${+_how_to_hist_ready} )); then
+    typeset -g _how_to_hist_ready=1
+    return 0
+  fi
+  _how_to_hist_add $(( HISTCMD - 1 )) $rc
+}
+
 # Print the <context> block built from HOW_TO_CONTEXT. Missing or failing
 # providers contribute nothing. A space-separated string works as well as an
 # array.
@@ -87,6 +146,7 @@ described in <context>.
 Output ONLY the command: no explanation, no markdown, no code fences.
 Prefer tools listed in "tools:" when they fit; otherwise use standard POSIX/
 OS-native utilities.
+"history:" lines are the user'"'"'s latest commands, oldest first; "that"/"it" usually means the last one.
 Use a single line; chain with && or | when needed.
 Do not refuse destructive commands; the user reviews before running.
 If the request cannot be done with a shell command, output exactly:
@@ -165,6 +225,12 @@ function how-to {
   fi
   _how_to_push "$cmd"
 }
+
+# Record exit statuses for the history context (interactive shells only).
+unset _how_to_hist_ready
+if [[ -o interactive ]]; then
+  autoload -Uz add-zsh-hook && add-zsh-hook precmd _how_to_record
+fi
 
 # Keep globs like *.log in the request from being expanded by the shell.
 alias how-to='noglob how-to'

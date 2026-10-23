@@ -30,7 +30,7 @@ assert_eq "ctx: order+skip" $'<context>\na: 1\nb: 2\n</context>' "$(
   _how_to_context_bad() { print -u2 boom; return 1 }
   HOW_TO_CONTEXT=(a missing bad b); _how_to_context 2>&1)"
 assert_eq "ctx: preset kept" 'os' "$(HOW_TO_CONTEXT=(os); source $here/how-to.zsh; print $HOW_TO_CONTEXT)"
-assert_eq "ctx: default list" 'os shell cwd git tools' "$HOW_TO_CONTEXT"
+assert_eq "ctx: default list" 'os shell cwd git tools history' "${HOW_TO_CONTEXT[*]}"
 
 # --- built-in context providers
 tmp=$(mktemp -d); trap "rm -rf ${(q)tmp}" EXIT; mkdir "$tmp/a dir"; for i in {1..40}; touch "$tmp/a dir/f$i"
@@ -41,6 +41,62 @@ assert_eq "git: root in repo" "git_root: ${here:h}" "$(cd $here && _how_to_conte
 assert_eq "tools: only installed" 'tools: zsh' "$(HOW_TO_TOOLS=(zsh definitely-not-a-tool-xyz); _how_to_context_tools)"
 assert_eq "os" "os: $(uname -sr)" "$(_how_to_context_os)"
 assert_eq "shell" "shell: zsh $ZSH_VERSION" "$(_how_to_context_shell)"
+
+# --- history
+assert_eq "hist: default count" 5 "$HOW_TO_HISTORY"
+assert_eq "hist: order and limit" $'history: [exit 0] cmd3\nhistory: [exit 1] cmd4' "$(
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+assert_eq "hist: current event skipped" 'history: [exit 0] cmd4' "$(
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(4 5) _how_to_hist_rc=(0 0) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+assert_eq "hist: off at 0" '' "$(
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=0; _how_to_hist_lines 9)"
+assert_eq "hist: off when empty" '' "$(
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=; _how_to_hist_lines 9)"
+assert_eq "hist: off for non-number" '' "$(
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=abc; _how_to_hist_lines 9)"
+assert_eq "hist: nothing recorded" '' "$(_how_to_hist_num=() _how_to_hist_rc=(); _how_to_hist_lines 9 2>&1)"
+assert_eq "hist: N above count" 'history: [exit 0] cmd1' "$(
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) HOW_TO_HISTORY=50; _how_to_hist_lines 9)"
+assert_eq "hist: stale higher events skipped" $'history: [exit 0] cmd3\nhistory: [exit 0] cmd4' "$(
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(90 91 3 4) _how_to_hist_rc=(0 0 0 0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: unreadable skipped" 'history: [exit 0] cmd2' "$(
+  _how_to_hist_text() { [[ $1 == 2 ]] && print cmd2 }
+  _how_to_hist_num=(1 2) _how_to_hist_rc=(0 0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: newline escaped" 'history: [exit 0] a\nb' "$(
+  _how_to_hist_text() { print -r -- $'a\nb' }
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: truncated" "history: [exit 0] ${(l:500::x:)}…" "$(
+  _how_to_hist_text() { print -r -- ${(l:501::x:)} }
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: verbatim text" "history: [exit 0] printf '%s\\n' \"\$x\" \\t" "$(
+  _how_to_hist_text() { print -r -- "printf '%s\\n' \"\$x\" \\t" }
+  _how_to_hist_num=(1) _how_to_hist_rc=(0) HOW_TO_HISTORY=5; _how_to_hist_lines 5)"
+assert_eq "hist: add appends" '1 2|0 1' "$(
+  _how_to_hist_num=() _how_to_hist_rc=()
+  _how_to_hist_add 1 0; _how_to_hist_add 2 1; print -r -- "$_how_to_hist_num|$_how_to_hist_rc")"
+assert_eq "hist: add replaces last" '1 2|0 7' "$(
+  _how_to_hist_num=() _how_to_hist_rc=()
+  _how_to_hist_add 1 0; _how_to_hist_add 2 1; _how_to_hist_add 2 7; print -r -- "$_how_to_hist_num|$_how_to_hist_rc")"
+assert_eq "hist: add trims to 100" '100 6 105' "$(
+  _how_to_hist_num=() _how_to_hist_rc=()
+  for i in {1..105}; _how_to_hist_add $i 0
+  print ${#_how_to_hist_num} ${_how_to_hist_num[1]} ${_how_to_hist_num[-1]})"
+assert_eq "hist: first record skipped" '' "$(
+  unset _how_to_hist_ready; _how_to_hist_num=() _how_to_hist_rc=()
+  _how_to_record; print -r -- "$_how_to_hist_num")"
+assert_eq "hist: ksharrays" $'history: [exit 0] cmd3\nhistory: [exit 1] cmd4' "$(
+  setopt ksharrays
+  _how_to_hist_text() { print -r -- "cmd$1" }
+  _how_to_hist_num=(1 2 3 4) _how_to_hist_rc=(0 0 0 1) HOW_TO_HISTORY=2; _how_to_hist_lines 5)"
+assert_eq "hist: hook installed once" 1 "$(zsh -fic 'source '$here'/how-to.zsh; source '$here'/how-to.zsh; print ${#${(M)precmd_functions:#_how_to_record}}' 2>/dev/null | tail -1)"
+assert_eq "prompt: history line" 1 "$([[ $HOW_TO_SYSTEM_PROMPT == *'"history:" lines are the user'"'"'s latest commands, oldest first; "that"/"it" usually means the last one.'* ]] && print 1)"
 
 # --- how-to end to end (stub provider, captured push)
 _how_to_push() { pushed=$1 }
@@ -185,6 +241,13 @@ if {$mode eq "spin"} {
   set timeout 5
   send "echo FOLLOW-\$((1+1))\r"
   want "FOLLOW-2"
+} elseif {$mode eq "hist"} {
+  foreach c {"true" "false" " echo SECRET" ""} {
+    send "$c\r"
+    want "P> "
+  }
+  send "how-to x\r"
+  landed
 } elseif {$mode eq "fail"} {
   send "how-to x\r"
   want "nope"
@@ -199,6 +262,17 @@ source '$here/how-to.zsh'
 HOW_TO_CONTEXT=() HOW_TO_PROVIDER=stub
 _how_to_provider_stub() { cat >/dev/null; command sleep \$(<'$tmp/pty_sleep'); cat '$tmp/pty_cmd' }
 EOF
+  mkdir $tmp/zdh
+  printf 'old1\nold2\n' > $tmp/zhist
+  cat > $tmp/zdh/.zshrc <<EOF
+PS1='P> '; PROMPT_EOL_MARK=''; HISTFILE='$tmp/zhist'
+setopt histignorespace
+_clobber() { true }
+precmd_functions=(_clobber)
+source '$here/how-to.zsh'
+HOW_TO_CONTEXT=(history) HOW_TO_PROVIDER=stub
+_how_to_provider_stub() { cat > '$tmp/zhist_in'; cat '$tmp/pty_cmd' }
+EOF
   zpty_run() {  # zpty_run <mode> <sleep> <marker> <stub output>
     print -r -- $2 > $tmp/pty_sleep; print -r -- $4 > $tmp/pty_cmd
     expect $tmp/zpty.exp $tmp/zd $1 $3
@@ -209,6 +283,8 @@ EOF
   assert_eq "pty: spinner ctrl-c"               PTY-OK "$(zpty_run ctrlc 3 x 'echo x')"
   assert_eq "pty: spinner erased before error"  PTY-OK "$(zpty_run fail 0.4 x 'HOWTO_FAIL: nope')"
   assert_eq "pty: no spinner for fast provider" PTY-OK "$(zpty_run fast 0 ZS-42 'echo ZS-$((6*7))')"
+  assert_eq "pty: history recorded" PTY-OK "$(print -r -- 0 > $tmp/pty_sleep; print -r -- 'echo ZH-$((6*7))' > $tmp/pty_cmd; expect $tmp/zpty.exp $tmp/zdh hist ZH-42)"
+  assert_eq "pty: history context" $'history: [exit 0] true\nhistory: [exit 1] false' "$(grep '^history:' $tmp/zhist_in)"
 else
   print 'skip pty (no expect)'
 fi
