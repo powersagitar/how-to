@@ -50,10 +50,10 @@ job. A failing pty test prints the end of its transcript.
 
 Set `_how_to_version` at the top of both `src/how-to.zsh` and
 `src/how-to.bash` to `X.Y.Z` and commit. Then push a tag `vX.Y.Z`; the release
-fails if either file's version differs from the tag. `.github/workflows/release.yml` calls `test.yml`, and if
-every job passes it creates a GitHub release with `how-to-X.Y.Z.tar.gz` and
-its `.sha256`. The tarball contains `src/how-to.zsh`, `src/how-to.bash`,
-`LICENSE`, `README.md` and `docs/usage.md`.
+fails if either file's version differs from the tag.
+`.github/workflows/release.yml` calls `test.yml`, and if every job passes it
+creates a GitHub release with `how-to-X.Y.Z.tar.gz` and its `.sha256`. The
+tarball contains `src/how-to.zsh`, `src/how-to.bash`, `LICENSE`, `README.md` and `docs/usage.md`.
 
 The Homebrew formula lives in `powersagitar/homebrew-tap`, whose daily
 autobump workflow opens a pull request for each new release.

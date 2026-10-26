@@ -113,7 +113,7 @@ call only if its name starts with `HOW_TO_` (`HOW_TO_PROVIDER=ollama how-to
 
 ```
 $ how-to --version
-how-to 0.3.0
+how-to X.Y.Z
 ```
 
 `-v` and `--version` print the version and exit; any request is ignored. Only

@@ -173,6 +173,7 @@ assert_eq "version: ignores request" "0|how-to 0.3.0|0" "$rc|$(<$tmp/out)|$([[ -
 run -- -v x;  assert_eq "opts: -- passes dash request" "0|Request: -v x" "$rc|$(last_in)"
 run --;       assert_eq "opts: -- alone is usage" "2|$usage" "$rc|$err"
 run -x foo;   assert_eq "opts: unknown option" "2|how-to: unknown option '-x'" "$rc|${err%%$'\n'*}"
+run -V x;     assert_eq "opts: uppercase -V is unknown" "2|how-to: unknown option '-V'" "$rc|${err%%$'\n'*}"
 run list -v;  assert_eq "opts: trailing -v is request" "0|Request: list -v" "$rc|$(last_in)"
 run - x;      assert_eq "opts: lone dash is request" "Request: - x" "$(last_in)"
 ( setopt ksharrays; run -v; print -r -- "$rc|$(<$tmp/out)" > $tmp/ksh )

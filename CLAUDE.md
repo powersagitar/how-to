@@ -27,13 +27,14 @@ CI (`.github/workflows/test.yml`, every push) runs both suites on Ubuntu with
 expect: zsh once, and bash 4.4.18 and 5.0 (built from source) plus the runner's
 /bin/bash. A failing pty test prints the end of its transcript.
 
-Before tagging, set `_how_to_version` (top of both source files) to `X.Y.Z`;
-the release fails if either differs from the tag. Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml` instead: it calls
+Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml` instead: it calls
 `test.yml` (`workflow_call`), and if every job passes it creates a GitHub
 release with `how-to-X.Y.Z.tar.gz` and its `.sha256`. The Homebrew formula
 lives only in `powersagitar/homebrew-tap`, whose daily autobump workflow opens
 a pull request for each new release. Its `test do` sources both files (bash via
-Homebrew's bash, since macOS has 3.2).
+Homebrew's bash, since macOS has 3.2). Before tagging, set `_how_to_version`
+(top of both source files) to `X.Y.Z`; the release fails if either differs
+from the tag.
 
 There is no build or lint step. Tests are flat `assert_eq "<name>" expected actual` calls.
 
@@ -41,7 +42,12 @@ There is no build or lint step. Tests are flat `assert_eq "<name>" expected actu
 
 Every call runs one pipeline, `how-to` → `_how_to_context` → provider →
 `_how_to_clean` → `HOWTO_FAIL` check → `_how_to_push`. The two extension
-points are discovered by function name:
+points are discovered by function name. Leading words are parsed as options
+first: `-v`/`--version` prints `how-to $_how_to_version` and returns 0, `--`
+ends options, and any other `-word` prints `how-to: unknown option '<word>'`
+plus usage and returns 2. `_how_to_version` is a plain variable, assigned
+unconditionally (not a config variable), and must match in both files and the
+release tag.
 
 - **Model providers** are `_how_to_provider_<name>`, selected by
   `HOW_TO_PROVIDER` (default `claude`). `$1` is the system prompt, stdin is
