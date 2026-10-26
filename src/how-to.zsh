@@ -1,6 +1,8 @@
 # how-to: turn a plain-English request into a shell command on your prompt.
 # usage: source /path/to/how-to.zsh   (from ~/.zshrc)
 
+_how_to_version=0.3.0
+
 # Reduce a model response (stdin) to the command: if it has a fenced block,
 # keep only the inside of the first one (dedented by the fence's own indent);
 # strip surrounding blank lines and trailing whitespace. Inner indentation is
@@ -209,8 +211,24 @@ _how_to_spin() {
 
 function how-to {
   emulate -L zsh
+  local ver=
+  while (( $# )); do
+    case $1 in
+      -v|--version) ver=1; shift ;;
+      --) shift; break ;;
+      -?*)
+        print -u2 -r -- "how-to: unknown option '$1'"
+        print -u2 'usage: how-to [-v | --version] [--] <what you want to do>'
+        return 2 ;;
+      *) break ;;
+    esac
+  done
+  if [[ -n $ver ]]; then
+    print -r -- "how-to $_how_to_version"
+    return 0
+  fi
   if (( ! $# )); then
-    print -u2 'usage: how-to <what you want to do>'
+    print -u2 'usage: how-to [-v | --version] [--] <what you want to do>'
     return 2
   fi
   local name=${HOW_TO_PROVIDER:-claude}

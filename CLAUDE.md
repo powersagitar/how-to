@@ -10,8 +10,9 @@ two independent files with the same pipeline: `src/how-to.zsh` (sourced from
 `~/.zshrc`, pushes with `print -rz`) and `src/how-to.bash` (sourced from
 `~/.bashrc`, bash >= 4.4, pushes via a terminal DSR reply; see "bash
 conventions" below). They must be sourced, not run as scripts, because a child
-process can't write to the parent shell's line editor. User docs are in `docs/usage.md`, developer docs in `docs/development.md`; the design spec
-is in `docs/superpowers/specs/`.
+process can't write to the parent shell's line editor. User docs are in
+`docs/usage.md`, developer docs in `docs/development.md`; the design spec is in
+`docs/superpowers/specs/`.
 
 ## Commands
 
@@ -26,7 +27,8 @@ CI (`.github/workflows/test.yml`, every push) runs both suites on Ubuntu with
 expect: zsh once, and bash 4.4.18 and 5.0 (built from source) plus the runner's
 /bin/bash. A failing pty test prints the end of its transcript.
 
-Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml` instead: it calls
+Before tagging, set `_how_to_version` (top of both source files) to `X.Y.Z`;
+the release fails if either differs from the tag. Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml` instead: it calls
 `test.yml` (`workflow_call`), and if every job passes it creates a GitHub
 release with `how-to-X.Y.Z.tar.gz` and its `.sha256`. The Homebrew formula
 lives only in `powersagitar/homebrew-tap`, whose daily autobump workflow opens

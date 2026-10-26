@@ -6,6 +6,8 @@ if ! (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)
   return 1
 fi
 
+_how_to_version=0.3.0
+
 # Reduce a model response (stdin) to the command: if it has a fenced block,
 # keep only the inside of the first one (dedented by the fence's own indent);
 # strip surrounding blank lines and trailing whitespace. Inner indentation is
@@ -342,8 +344,27 @@ _how_to_main() {
   _how_to_pending=
   # declare -p output; inside a function it declares locals for this call.
   eval "$env" 2>/dev/null || :
+  # Option words are leading only. Case-sensitive whatever the user's nocasematch.
+  local ver= po; po=$(shopt -p nocasematch) || :
+  shopt -u nocasematch
+  while (( $# )); do
+    case $1 in
+      -v|--version) ver=1; shift ;;
+      --) shift; break ;;
+      -?*)
+        eval "$po"
+        printf '%s\n' "how-to: unknown option '$1'" 'usage: how-to [-v | --version] [--] <what you want to do>' >&2
+        return 2 ;;
+      *) break ;;
+    esac
+  done
+  eval "$po"
+  if [[ -n $ver ]]; then
+    printf '%s\n' "how-to $_how_to_version"
+    return 0
+  fi
   if (( ! $# )); then
-    printf '%s\n' 'usage: how-to <what you want to do>' >&2
+    printf '%s\n' 'usage: how-to [-v | --version] [--] <what you want to do>' >&2
     return 2
   fi
   local name=${HOW_TO_PROVIDER:-claude}

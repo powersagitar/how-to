@@ -109,6 +109,18 @@ The quoting advice above applies too. `cond && how-to ...` and
 call only if its name starts with `HOW_TO_` (`HOW_TO_PROVIDER=ollama how-to
 ...`); any other assignment in front is ignored.
 
+### Options
+
+```
+$ how-to --version
+how-to 0.3.0
+```
+
+`-v` and `--version` print the version and exit; any request is ignored. Only
+leading words are options, so `how-to list files -v` sends `list files -v` as
+the request. Use `--` to start a request with a dash (`how-to -- -v flag of
+ls`). An unknown option such as `-x` prints an error and the usage line.
+
 ## Recent commands
 
 Each request carries your last few commands and their exit statuses, so

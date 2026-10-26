@@ -237,7 +237,7 @@ _how_to_provider_stub() {
 }
 HOW_TO_PROVIDER=stub
 HOW_TO_CONTEXT=()
-run() { pushed=; _how_to_main "$@" 2>"$tmp/err" >/dev/null; rc=$?; err=$(<"$tmp/err"); }
+run() { pushed=; _how_to_main "$@" 2>"$tmp/err" >"$tmp/out"; rc=$?; err=$(<"$tmp/err"); }
 last_in() { local s; s=$(<"$tmp/in"); printf '%s\n' "${s##*$'\n'}"; }
 globf() { printf '%s' "${-//[^f]/}"; }
 
@@ -283,7 +283,8 @@ _how_to_pending=stale; run
 assert_eq "main: clears stale pending" '' "$_how_to_pending"
 assert_eq "re-source ok" '' "$(source "$here/how-to.bash" 2>&1)"
 
-run;                          assert_eq "no args rc" 2 "$rc"; assert_eq "no args msg" 'usage: how-to <what you want to do>' "$err"
+usage='usage: how-to [-v | --version] [--] <what you want to do>'
+run;                          assert_eq "no args rc" 2 "$rc"; assert_eq "no args msg" 'usage: how-to [-v | --version] [--] <what you want to do>' "$err"
 HOW_TO_PROVIDER=nope run x;   assert_eq "unknown rc" 1 "$rc"; assert_eq "unknown msg" "how-to: unknown provider 'nope'" "$err"
 stub_out=''; stub_rc=1; run x; assert_eq "prov fail rc" 1 "$rc"; assert_eq "prov fail msg" 'how-to: provider failed' "$err"; stub_rc=0
 stub_out=$'```\n```'; run x;  assert_eq "empty rc" 1 "$rc"; assert_eq "empty msg" 'how-to: no command returned' "$err"
@@ -297,6 +298,34 @@ stub_out='ls'; ( set -euo pipefail; shopt -s failglob nocasematch; IFS=:; run x;
 assert_eq "e2e: hostile opts" 'ls' "$(<"$tmp/hostile")"
 stub_out='howto_fail: x'; ( shopt -s nocasematch; run x; printf '%s\n' "$pushed" > "$tmp/nocase" )
 assert_eq "fail: case-sensitive under nocasematch" 'howto_fail: x' "$(<"$tmp/nocase")"
+
+# --- version flag and option parsing
+version_tests() {  # run under whatever options the caller set; prints results
+  local o=  # rc-2 calls use "|| :" so set -e survives them
+  stub_out=ls; rm -f "$tmp/in"; run -v
+  o+="$rc|$(<"$tmp/out")|$pushed|$([[ -e $tmp/in ]] && echo 1 || echo 0);"
+  run --version; o+="$rc|$(<"$tmp/out");"
+  rm -f "$tmp/in"; run -v foo; o+="$rc|$(<"$tmp/out")|$([[ -e $tmp/in ]] && echo 1 || echo 0);"
+  run -V x || :; o+="$rc|${err%%$'\n'*};"
+  run -- -v x; o+="$rc|$(last_in);"
+  run -- || :; o+="$rc|$err;"
+  run -x foo || :; o+="$rc|${err%%$'\n'*};"
+  run list -v; o+="$rc|$(last_in);"
+  run - x; o+="$(last_in);"
+  printf '%s' "$o"
+}
+vexp="0|how-to 0.3.0||0;0|how-to 0.3.0;0|how-to 0.3.0|0;2|how-to: unknown option '-V';0|Request: -v x;2|$usage;2|how-to: unknown option '-x';0|Request: list -v;Request: - x;"
+assert_eq "version: -v" "0|how-to 0.3.0||0" "$(version_tests | cut -d';' -f1)"
+assert_eq "version: --version" "0|how-to 0.3.0" "$(version_tests | cut -d';' -f2)"
+assert_eq "version: ignores request" "0|how-to 0.3.0|0" "$(version_tests | cut -d';' -f3)"
+assert_eq "opts: uppercase -V is unknown" "2|how-to: unknown option '-V'" "$(version_tests | cut -d';' -f4)"
+assert_eq "opts: -- passes dash request" "0|Request: -v x" "$(version_tests | cut -d';' -f5)"
+assert_eq "opts: -- alone is usage" "2|$usage" "$(version_tests | cut -d';' -f6)"
+assert_eq "opts: unknown option" "2|how-to: unknown option '-x'" "$(version_tests | cut -d';' -f7)"
+assert_eq "opts: trailing -v is request" "0|Request: list -v" "$(version_tests | cut -d';' -f8)"
+assert_eq "opts: lone dash is request" "Request: - x" "$(version_tests | cut -d';' -f9)"
+assert_eq "version: strict and hostile options" "$vexp" "$(set -euo pipefail; shopt -s failglob nocasematch nullglob extglob; IFS=:; version_tests)"
+assert_eq "version: same in both files" "$(zsh -fc "source '$here/how-to.zsh'; print -r -- \$_how_to_version")" "$_how_to_version"
 
 # --- claude provider argv (fake executable; `command` bypasses functions)
 mkdir "$tmp/bin"; printf '%s\n' '#!/bin/sh' 'printf "%s|" "$@"; echo; cat' > "$tmp/bin/claude"; chmod +x "$tmp/bin/claude"

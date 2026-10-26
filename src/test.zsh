@@ -116,7 +116,7 @@ _how_to_provider_stub() {
   print -r -- "$stub_out"; return ${stub_rc:-0}
 }
 HOW_TO_PROVIDER=stub HOW_TO_CONTEXT=()
-run() { pushed=; how-to "$@" 2>$tmp/err >/dev/null; rc=$?; err=$(<$tmp/err) }
+run() { pushed=; how-to "$@" 2>$tmp/err >$tmp/out; rc=$?; err=$(<$tmp/err) }
 last_in() { local s=$(<$tmp/in); print -r -- "${s##*$'\n'}" }
 
 stub_out='tokei .'; run lines of code
@@ -133,7 +133,8 @@ assert_eq "noglob request" 'Request: find all *.nomatch-xyz files' "$(last_in)"
 assert_eq "noglob alias" 'noglob how-to' "${aliases[how-to]}"
 assert_eq "re-source ok" '' "$(source $here/how-to.zsh 2>&1)"
 
-run;                          assert_eq "no args rc" 2 $rc; assert_eq "no args msg" 'usage: how-to <what you want to do>' "$err"
+usage='usage: how-to [-v | --version] [--] <what you want to do>'
+run;                          assert_eq "no args rc" 2 $rc; assert_eq "no args msg" 'usage: how-to [-v | --version] [--] <what you want to do>' "$err"
 HOW_TO_PROVIDER=nope run x;   assert_eq "unknown rc" 1 $rc; assert_eq "unknown msg" "how-to: unknown provider 'nope'" "$err"
 stub_out=''; stub_rc=1; run x; assert_eq "prov fail rc" 1 $rc; assert_eq "prov fail msg" 'how-to: provider failed' "$err"; stub_rc=0
 stub_out=$'```\n```'; run x;  assert_eq "empty rc" 1 $rc; assert_eq "empty msg" 'how-to: no command returned' "$err"
@@ -162,6 +163,20 @@ assert_eq "clean: prose around fence" 'fd -e log' \
   "$(print -r -- $'Here is the command:\n```bash\nfd -e log\n```\nThis finds logs.' | _how_to_clean)"
 stub_out=$'Sorry.\nHOWTO_FAIL: no'; run x
 assert_eq "fail on later line msg" 'no' "$err"; assert_eq "fail on later line not pushed" '' "$pushed"
+
+# --- version flag and option parsing
+stub_out=ls; rm -f $tmp/in; run -v
+assert_eq "version: -v" "0|how-to 0.3.0||0" "$rc|$(<$tmp/out)|$pushed|$([[ -e $tmp/in ]] && print 1 || print 0)"
+run --version; assert_eq "version: --version" "0|how-to 0.3.0" "$rc|$(<$tmp/out)"
+rm -f $tmp/in; run -v foo
+assert_eq "version: ignores request" "0|how-to 0.3.0|0" "$rc|$(<$tmp/out)|$([[ -e $tmp/in ]] && print 1 || print 0)"
+run -- -v x;  assert_eq "opts: -- passes dash request" "0|Request: -v x" "$rc|$(last_in)"
+run --;       assert_eq "opts: -- alone is usage" "2|$usage" "$rc|$err"
+run -x foo;   assert_eq "opts: unknown option" "2|how-to: unknown option '-x'" "$rc|${err%%$'\n'*}"
+run list -v;  assert_eq "opts: trailing -v is request" "0|Request: list -v" "$rc|$(last_in)"
+run - x;      assert_eq "opts: lone dash is request" "Request: - x" "$(last_in)"
+( setopt ksharrays; run -v; print -r -- "$rc|$(<$tmp/out)" > $tmp/ksh )
+assert_eq "version: ksharrays" "0|how-to 0.3.0" "$(<$tmp/ksh)"
 
 # --- deferred fixes
 assert_eq "clean: indented fence" 'ls -la' "$(print -r -- $'  ```bash\n  ls -la\n  ```' | _how_to_clean)"

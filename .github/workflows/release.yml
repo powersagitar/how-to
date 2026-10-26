@@ -33,6 +33,10 @@ jobs:
       - name: Check tag
         run: |
           [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag $TAG is not vX.Y.Z"; exit 1; }
+          for f in src/how-to.zsh src/how-to.bash; do
+            v=$(sed -n 's/^_how_to_version=//p' "$f")
+            [[ $v == "${TAG#v}" ]] || { echo "::error::_how_to_version in $f is '$v', not ${TAG#v}"; exit 1; }
+          done
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
       - name: Build tarball
         run: |
