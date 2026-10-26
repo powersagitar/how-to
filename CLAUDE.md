@@ -10,7 +10,7 @@ two independent files with the same pipeline: `src/how-to.zsh` (sourced from
 `~/.zshrc`, pushes with `print -rz`) and `src/how-to.bash` (sourced from
 `~/.bashrc`, bash >= 4.4, pushes via a terminal DSR reply; see "bash
 conventions" below). They must be sourced, not run as scripts, because a child
-process can't write to the parent shell's line editor. User docs are in `docs/usage.md`; the design spec
+process can't write to the parent shell's line editor. User docs are in `docs/usage.md`, developer docs in `docs/development.md`; the design spec
 is in `docs/superpowers/specs/`.
 
 ## Commands

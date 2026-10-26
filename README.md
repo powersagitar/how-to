@@ -30,3 +30,5 @@ The default provider needs `claude` on your `PATH` and logged in.
 
 See [docs/usage.md](docs/usage.md) for installing without Homebrew and for
 configuration.
+
+Contributors: see [docs/development.md](docs/development.md).
